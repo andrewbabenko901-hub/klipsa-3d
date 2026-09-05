@@ -60,7 +60,9 @@
         <label style="margin-top:11px"><input type="checkbox" id="chBezPometok" style="width:auto;vertical-align:-1px">
           на фото есть красные пометки — выкинуть при обмере</label>
         <label style="margin-top:5px"><input type="checkbox" id="chList" style="width:auto;vertical-align:-1px">
-          рисовать лист разбора нейронкой (платно)</label>
+          рисовать лист разбора нейронкой (нужен биллинг на ключе)</label>
+        <div class="podskazka">Без биллинга модели картинок отвечают отказом по квоте. Лист из нашей
+          модели — вкладка «Лист разбора» — строится всегда и бесплатно.</div>
 
         <button class="knopka glav" id="knSintez" style="margin-top:12px">Синтезировать 3D-модель</button>
         <div id="oshibka"></div>
@@ -155,9 +157,11 @@
         </h3>
         <pre class="json" id="jsonVyhod">[]</pre>
 
-        <div style="display:flex;gap:8px;margin-top:11px">
-          <button class="knopka" id="knStl" style="flex:1">Скачать STL</button>
-          <button class="knopka" id="knPng" style="flex:1">Скачать чертёж</button>
+        <div style="display:flex;gap:8px;margin-top:11px;flex-wrap:wrap">
+          <button class="knopka" id="knStl" style="flex:1 1 45%">Скачать STL</button>
+          <button class="knopka" id="knPng" style="flex:1 1 45%">Скачать чертёж</button>
+          <button class="knopka" id="knList" style="flex:1 1 45%">Скачать лист разбора</button>
+          <button class="knopka" id="knNejro" style="flex:1 1 45%">Скачать лист нейронки</button>
         </div>
       </div>
     </div>
