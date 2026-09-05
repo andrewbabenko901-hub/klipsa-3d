@@ -67,8 +67,8 @@ export function chertyozh(cv, geom, opis) {
   for (let x = 0; x < W; x += 16) { cx.beginPath(); cx.moveTo(x+.5,0); cx.lineTo(x+.5,H); cx.stroke(); }
   for (let y = 0; y < H; y += 16) { cx.beginPath(); cx.moveTo(0,y+.5); cx.lineTo(W,y+.5); cx.stroke(); }
 
-  const podval = 34;
-  const CW = W/2, CH = (H - podval)/2, pad = 30;
+  const podval = Math.max(30, Math.round(H*0.05));
+  const CW = W/2, CH = (H - podval)/2, pad = Math.max(24, Math.round(Math.min(CW,CH)*0.13));
   const cvet = opis?.cvet || [70, 128, 90];
   const poz = { speredi:[0,0], sboku:[1,0], sverhu:[0,1], izo:[1,1] };
 
@@ -83,20 +83,22 @@ export function chertyozh(cv, geom, opis) {
     risovat(cx, tris, rezh, sc, ox, oy, cvet);
     cx.restore();
     cx.strokeStyle = '#c3ccc1'; cx.strokeRect(cxi*CW+.5, cyi*CH+.5, CW-1, CH-1);
-    cx.fillStyle = '#2b3a33'; cx.font = 'bold 11px system-ui, sans-serif';
-    cx.fillText(PODPISI[rezh], cxi*CW + 10, cyi*CH + 17);
+    const kegl = Math.max(11, Math.round(H*0.016));
+    cx.fillStyle = '#2b3a33'; cx.font = 'bold ' + kegl + 'px system-ui, sans-serif';
+    cx.fillText(PODPISI[rezh], cxi*CW + kegl, cyi*CH + kegl*1.6);
 
     if (rezh === 'speredi' && opis) {
       // размерные линии по габаритам
       const px0 = x0*sc+ox, px1 = x1*sc+ox, py0 = y0*sc+oy, py1 = y1*sc+oy;
+      const k2 = Math.max(10, Math.round(H*0.014));
       cx.strokeStyle = '#7a8a80'; cx.fillStyle = '#3a4a42';
-      cx.font = '10px system-ui, sans-serif'; cx.setLineDash([4,3]);
+      cx.font = k2 + 'px system-ui, sans-serif'; cx.setLineDash([4,3]);
       cx.beginPath(); cx.moveTo(px1+8, py0); cx.lineTo(px1+8, py1); cx.stroke();
       cx.beginPath(); cx.moveTo(px0, py1+8); cx.lineTo(px1, py1+8); cx.stroke();
       cx.setLineDash([]);
-      cx.save(); cx.translate(px1+20, (py0+py1)/2); cx.rotate(-Math.PI/2);
-      cx.fillText('H = ' + opis.vysota + ' мм', -22, 0); cx.restore();
-      cx.fillText('W = ' + opis.shirina + ' мм', (px0+px1)/2 - 26, py1 + 20);
+      cx.save(); cx.translate(px1+k2*2, (py0+py1)/2); cx.rotate(-Math.PI/2);
+      cx.fillText('H = ' + opis.vysota + ' мм', -k2*2.4, 0); cx.restore();
+      cx.fillText('W = ' + opis.shirina + ' мм', (px0+px1)/2 - k2*2.8, py1 + k2*2);
     }
   }
   // подвал как на чертеже
@@ -113,11 +115,12 @@ export function chertyozh(cv, geom, opis) {
     ['ЭЛЕМЕНТОВ', String(opis?.elementov ?? '—')],
     ['МАСШТАБ', '1:1'],
   ];
+  const kp = Math.max(8, Math.round(podval*0.24));
   tekst.forEach(([a, b], i) => {
-    cx.fillStyle = '#7a8a80'; cx.font = '8px system-ui, sans-serif';
-    cx.fillText(a, kol[i] + 8, y + 13);
-    cx.fillStyle = '#22302a'; cx.font = 'bold 11px system-ui, sans-serif';
-    cx.fillText(String(b).slice(0, 22), kol[i] + 8, y + 26);
+    cx.fillStyle = '#7a8a80'; cx.font = kp + 'px system-ui, sans-serif';
+    cx.fillText(a, kol[i] + kp, y + podval*0.38);
+    cx.fillStyle = '#22302a'; cx.font = 'bold ' + Math.round(kp*1.35) + 'px system-ui, sans-serif';
+    cx.fillText(String(b).slice(0, 26), kol[i] + kp, y + podval*0.78);
   });
 }
 
@@ -127,7 +130,7 @@ export function listRazbora(cv, geomPolnaya, geomTel, cvet) {
   cx.fillStyle = '#d1d3cf'; cx.fillRect(0,0,W,H);
   const MID = Math.round(W/2);
   const tris = treugolniki(geomPolnaya);
-  const CW = MID/2, CH = H/2, pad = 34;
+  const CW = MID/2, CH = H/2, pad = Math.max(26, Math.round(Math.min(CW,CH)*0.15));
   const poz = { speredi:[0,0], sboku:[1,0], sverhu:[0,1], izo:[1,1] };
   for (const rezh of Object.keys(poz)) {
     const [a,b] = poz[rezh];
@@ -137,15 +140,18 @@ export function listRazbora(cv, geomPolnaya, geomTel, cvet) {
     risovat(cx, tris, rezh, sc, a*CW+(CW-(x1-x0)*sc)/2-x0*sc, b*CH+(CH-(y1-y0)*sc)/2-y0*sc, cvet);
     cx.restore();
   }
-  cx.strokeStyle = '#9aa09a'; cx.lineWidth = 2;
+  cx.strokeStyle = '#9aa09a'; cx.lineWidth = Math.max(2, Math.round(H*0.003));
   cx.beginPath(); cx.moveTo(MID, 0); cx.lineTo(MID, H); cx.stroke();
 
   const tela = geomTel.map(treugolniki).filter(t => t.length);
   if (!tela.length) return;
   const gab = tela.map(t => ramki(t, 'speredi'));
   const hs = gab.map(g => g[3]-g[2]), ws = gab.map(g => g[1]-g[0]);
-  const TOP = 40, BOT = H-40, GAP = 18;
-  const sc = Math.min((MID-120)/Math.max(...ws), (BOT-TOP-GAP*(tela.length-1))/Math.max(hs.reduce((a,b)=>a+b,0),1e-6));
+  const pole = Math.round(H*0.07), GAP = Math.round(H*0.028);
+  const TOP = pole, BOT = H - pole;
+  const sc = Math.min(
+    (MID - Math.round(MID*0.22)) / Math.max(...ws),
+    (BOT - TOP - GAP*(tela.length-1)) / Math.max(hs.reduce((a,b)=>a+b,0), 1e-6));
   let y = TOP + Math.max(0, (BOT-TOP-GAP*(tela.length-1)-hs.reduce((a,b)=>a+b,0)*sc)/2);
   const CX = MID + (W-MID)/2;
   cx.save(); cx.beginPath(); cx.rect(MID+1, 0, W-MID-1, H); cx.clip();

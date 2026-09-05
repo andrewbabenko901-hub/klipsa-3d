@@ -95,7 +95,16 @@ export function obmerit(img, opt = {}) {
   const shir = vert ? (vyb.x1-vyb.x0+1) : (vyb.y1-vyb.y0+1);
   const vys  = vert ? (vyb.y1-vyb.y0+1) : (vyb.x1-vyb.x0+1);
 
+  // средний цвет детали: лист и чертёж рисуются им, а не вечно зелёным
+  let sr=0, sg=0, sb=0, n2=0;
+  for (let i = 0; i < N; i++) if (metka[i] === vyb.nom) { sr+=d[i*4]; sg+=d[i*4+1]; sb+=d[i*4+2]; n2++; }
+  let cvet = n2 ? [Math.round(sr/n2), Math.round(sg/n2), Math.round(sb/n2)] : [74,132,92];
+  // слишком тёмный или выцветший подтягиваем, иначе на рендере ничего не видно
+  const yark = Math.max(...cvet);
+  if (yark < 70) cvet = cvet.map(v => Math.min(255, Math.round(v * 70/Math.max(yark,1))));
+
   return {
+    cvet,
     os: vert ? 'вертикально' : 'горизонтально',
     shirinaPx: shir, vysotaPx: vys,
     vysotaKShirine: +(vys / Math.max(1, shir)).toFixed(4),

@@ -92,13 +92,15 @@ function pererisovat() {
   const { celoe, kuski } = geomRecepta(S.els);
   pokazatModel(celoe);
   const gab = summarno(S.els);
+  const cvet = (S.izmer && S.izmer.cvet) || [74, 132, 92];
   chertyozh($('#chertyozh'), celoe, {
     nomer: $('#pNomer').value || '—',
     material: $('#pMaterial').value || 'пластик',
     elementov: S.els.length, vysota: gab.vysota, shirina: gab.shirina,
-    cvet: [70, 128, 90],
+    cvet,
   });
-  listRazbora($('#listRazbora'), celoe, kuski.filter(Boolean), [74, 132, 92]);
+  listRazbora($('#listRazbora'), celoe, kuski.filter(Boolean), cvet);
+  if (telo3d) telo3d.material.color.setRGB(cvet[0]/255, cvet[1]/255, cvet[2]/255);
 }
 
 // ---------- панель результата ----------
@@ -338,7 +340,10 @@ async function sintez() {
     if (/API key not valid|API_KEY_INVALID/i.test(m))
       m = 'Google не принял ключ. Открой «Ключ и модели» и нажми «Проверить ключ».';
     else if (/quota|RESOURCE_EXHAUSTED|429/i.test(m))
-      m = 'Упёрлись в лимит запросов. Подожди минуту и повтори — или включи биллинг в проекте.';
+      m = 'Google отказал по квоте (429). Для рисования листа картинкой на ключе должен быть ' +
+          'включён биллинг — на бесплатном уровне модели картинок не работают. ' +
+          'Разбор при этом идёт нормально: сними галочку «рисовать лист нейронкой», ' +
+          'а картинку возьми на вкладке «Лист разбора» — он строится из нашей модели и ничего не стоит.';
     else if (/not found|404/i.test(m))
       m = 'Такой модели у твоего ключа нет. Открой «Ключ и модели», нажми «Проверить ключ» и выбери другую.';
     else if (/Failed to fetch|NetworkError/i.test(m))
@@ -388,7 +393,7 @@ const PROBY = [
     {nomer:3,tip:'vorotnik',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.11,dolyaShiriny:0.73,suzhaetsya:'kverhu',opisanie:'воротник-ограничитель',uverennost:0.85},
     {nomer:4,tip:'elochka',sechenie:'krugloe',rebra:0,zubcov:7,napravlenieZubcov:'vverh',dolyaVysoty:0.51,dolyaShiriny:0.52,suzhaetsya:'net',opisanie:'ёлочка, 7 лепестков',uverennost:0.9},
     {nomer:5,tip:'ostrie',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.14,dolyaShiriny:0.21,suzhaetsya:'knizu',opisanie:'носик-конус',uverennost:0.8}],
-    izmer:{os:'вертикально',vysotaKShirine:1.29,zapolnennost:.46,polosy:
+    izmer:{os:'вертикально',cvet:[52,122,74],vysotaKShirine:1.29,zapolnennost:.46,polosy:
       [.55,.95,1,.98,.42,.33,.31,.34,.55,.72,.73,.66,.5,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.52,.5,.44,.36,.3,.26,.24,.21,.17,.12]},
     kat:{shirinaMm:16} },
   { p:'Жёлтая клипса обшивки', o:'Три диска и нос с рёбрами', tela:[
@@ -397,21 +402,21 @@ const PROBY = [
     {nomer:3,tip:'disk',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.11,dolyaShiriny:1.0,suzhaetsya:'net',opisanie:'средний диск',uverennost:0.92},
     {nomer:4,tip:'vorotnik',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.16,dolyaShiriny:0.95,suzhaetsya:'kverhu',opisanie:'воротник-юбка',uverennost:0.82},
     {nomer:5,tip:'konus',sechenie:'krest_s_rebrami',rebra:4,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.57,dolyaShiriny:0.6,suzhaetsya:'knizu',opisanie:'нос с четырьмя рёбрами',uverennost:0.75}],
-    izmer:{os:'вертикально',vysotaKShirine:1.30,zapolnennost:.55,polosy:
+    izmer:{os:'вертикально',cvet:[243,231,83],vysotaKShirine:1.30,zapolnennost:.55,polosy:
       [.71,.78,.79,.77,.47,.43,.92,1,1,.99,.78,.54,.68,.81,.93,.95,.94,.77,.56,.59,.6,.59,.57,.56,.54,.52,.5,.49,.47,.45,.43,.42,.4,.38,.37,.35,.3,.24,.18,.12]},
     kat:{shirinaMm:20} },
   { p:'Auveco 14319', o:'Купол и разрезной конус', tela:[
     {nomer:1,tip:'shlyapka_kupol',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.16,dolyaShiriny:1.0,suzhaetsya:'net',opisanie:'купольная шляпка',uverennost:0.9},
     {nomer:2,tip:'shejka',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.06,dolyaShiriny:0.38,suzhaetsya:'net',opisanie:'шейка',uverennost:0.8},
     {nomer:3,tip:'konus',sechenie:'razreznoe',rebra:2,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.78,dolyaShiriny:0.95,suzhaetsya:'knizu',opisanie:'разрезной конус',uverennost:0.85}],
-    izmer:{os:'вертикально',vysotaKShirine:1.05,zapolnennost:.5,polosy:
+    izmer:{os:'вертикально',cvet:[46,110,68],vysotaKShirine:1.05,zapolnennost:.5,polosy:
       [.8,.98,1,.95,.4,.36,.36,.9,.94,.9,.86,.82,.78,.74,.7,.66,.62,.58,.55,.52,.49,.46,.43,.4,.37,.34,.31,.28,.26,.24,.22,.2,.18,.17,.16,.15,.14,.13,.12,.1]},
     kat:{shirinaMm:20} },
   { p:'Auveco 21382', o:'Плита молдинга и ёлочка', tela:[
     {nomer:1,tip:'plita',sechenie:'pryamougolnoe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.11,dolyaShiriny:1.0,suzhaetsya:'net',opisanie:'плита молдинга',uverennost:0.88},
     {nomer:2,tip:'shejka',sechenie:'krugloe',rebra:0,zubcov:0,napravlenieZubcov:'net',dolyaVysoty:0.28,dolyaShiriny:0.31,suzhaetsya:'net',opisanie:'шейка',uverennost:0.85},
     {nomer:3,tip:'elochka',sechenie:'krugloe',rebra:0,zubcov:5,napravlenieZubcov:'vverh',dolyaVysoty:0.61,dolyaShiriny:0.54,suzhaetsya:'net',opisanie:'ёлочка, 5 лепестков',uverennost:0.87}],
-    izmer:{os:'вертикально',vysotaKShirine:1.45,zapolnennost:.42,polosy:
+    izmer:{os:'вертикально',cvet:[64,64,68],vysotaKShirine:1.45,zapolnennost:.42,polosy:
       [.7,1,.98,.32,.3,.3,.3,.3,.3,.3,.3,.3,.5,.54,.5,.46,.54,.5,.46,.54,.5,.46,.54,.5,.46,.54,.5,.46,.54,.5,.46,.5,.44,.38,.32,.28,.24,.2,.16,.12]},
     kat:{shirinaMm:17.5} },
 ];
@@ -568,8 +573,24 @@ function start() {
     const { celoe } = geomRecepta(S.els);
     skachat(vStl(celoe, $('#pNomer').value), ($('#pNomer').value || 'klipsa').replace(/\s+/g,'_') + '.stl');
   };
-  $('#knPng').onclick = () => {
-    $('#chertyozh').toBlob(b => skachat(b, ($('#pNomer').value || 'klipsa').replace(/\s+/g,'_') + '_chertyozh.png'));
+  const imyaFajla = h => (($('#pNomer').value || 'klipsa').replace(/\s+/g,'_') + h);
+  // листы перерисовываем в большом разрешении прямо перед сохранением
+  function vBolshom(cv, w, h, delat) {
+    const sw = cv.width, sh = cv.height;
+    cv.width = w; cv.height = h; delat();
+    return new Promise(res => cv.toBlob(b => { cv.width = sw; cv.height = sh; pererisovat(); res(b); }));
+  }
+  $('#knPng').onclick = async () => {
+    if (!S.els.length) return;
+    skachat(await vBolshom($('#chertyozh'), 2000, 1400, pererisovat), imyaFajla('_chertyozh.png'));
+  };
+  $('#knList').onclick = async () => {
+    if (!S.els.length) return;
+    skachat(await vBolshom($('#listRazbora'), 2200, 1240, pererisovat), imyaFajla('_list_razbora.png'));
+  };
+  $('#knNejro').onclick = () => {
+    if (!S.nejro) return;
+    fetch(S.nejro).then(r => r.blob()).then(b => skachat(b, imyaFajla('_list_nejronki.png')));
   };
   $('#knVygruzit').onclick = () => {
     const d = LS.ist.reduce((a, z) => { a[z.nomer] = z.els.map(e => [e.kind, e.params]); return a; }, {});
