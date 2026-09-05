@@ -230,8 +230,11 @@ function shag(imya, sost) {
 }
 function shagiSbros(){ $$('.shagi li').forEach(l => l.classList.remove('idet','est','sboj')); }
 
-function skazatOshibku(t) {
-  $('#oshibka').innerHTML = t ? `<div class="oshibka" style="margin-top:10px">${t}</div>` : '';
+function skazatOshibku(t, vazhno) {
+  const o = $('#oshibka');
+  o.innerHTML = t ? `<div class="oshibka" style="margin-top:10px">${t}</div>` : '';
+  if (t) { try { o.scrollIntoView({ block:'nearest', behavior:'smooth' }); } catch {} }
+  $('#drop').classList.toggle('zovyot', !!vazhno);
 }
 
 function pokazatRashod() {
@@ -245,7 +248,17 @@ function pokazatRashod() {
 
 // ---------- фото ----------
 function vstavitFoto(files) {
-  [...files].slice(0, 3 - S.foto.length).forEach(f => {
+  const spisok = [...files];
+  if (!spisok.length) { skazatOshibku(
+    'Ничего не пришло. Если тянешь картинку прямо со страницы сайта — так не выйдет: ' +
+    'сохрани её сначала к себе на диск и перетащи файл.'); return; }
+  const kartinki = spisok.filter(f => f.type.startsWith('image/'));
+  if (!kartinki.length) { skazatOshibku(
+    'Это не картинка: ' + spisok.map(f => f.name || 'файл').join(', ') +
+    '. Нужен JPG, PNG или WEBP. Если фото с айфона в HEIC — пересохрани в JPG.'); return; }
+  if (S.foto.length >= 3) { skazatOshibku('Уже загружено три фото, больше не влезет.'); return; }
+  skazatOshibku('');
+  kartinki.slice(0, 3 - S.foto.length).forEach(f => {
     if (!f.type.startsWith('image/')) return;
     const fr = new FileReader();
     fr.onload = () => {
@@ -270,9 +283,13 @@ function pokazatFoto() {
 // ---------- главный прогон ----------
 async function sintez() {
   skazatOshibku('');
-  if (!S.foto.length) return skazatOshibku('Сначала загрузи хотя бы одно фото.');
+  if (!S.foto.length) return skazatOshibku(
+    'Нет фотографии. Нажми на рамку выше и выбери файл, или перетащи его туда. ' +
+    'Хочешь просто посмотреть, как всё работает — щёлкни любую из эталонных проверок слева, ' +
+    'они идут без ключа и без сети.', true);
   const klyuch = LS.k;
-  if (!klyuch) { $('#oknoNastroek').showModal(); return skazatOshibku('Нужен ключ Gemini — вставь его в настройках.'); }
+  if (!klyuch) { $('#oknoNastroek').showModal();
+    return skazatOshibku('Нужен ключ Gemini. Вставь его в открывшемся окне и нажми «Проверить ключ».'); }
   $('#knSintez').disabled = true; shagiSbros();
 
   try {
@@ -317,7 +334,16 @@ async function sintez() {
   } catch (e) {
     console.error(e);
     $$('.shagi li.idet').forEach(l => { l.classList.remove('idet'); l.classList.add('sboj'); });
-    skazatOshibku('Не вышло: ' + e.message);
+    let m = e.message || String(e);
+    if (/API key not valid|API_KEY_INVALID/i.test(m))
+      m = 'Google не принял ключ. Открой «Ключ и модели» и нажми «Проверить ключ».';
+    else if (/quota|RESOURCE_EXHAUSTED|429/i.test(m))
+      m = 'Упёрлись в лимит запросов. Подожди минуту и повтори — или включи биллинг в проекте.';
+    else if (/not found|404/i.test(m))
+      m = 'Такой модели у твоего ключа нет. Открой «Ключ и модели», нажми «Проверить ключ» и выбери другую.';
+    else if (/Failed to fetch|NetworkError/i.test(m))
+      m = 'Сеть не пустила запрос к Google. Проверь интернет, VPN и блокировщики в браузере.';
+    skazatOshibku('Не вышло: ' + m);
   } finally { $('#knSintez').disabled = false; }
 }
 
@@ -470,7 +496,25 @@ function start() {
     ev.preventDefault(); drop.classList.add('nad'); }));
   ['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => {
     ev.preventDefault(); drop.classList.remove('nad'); }));
-  drop.addEventListener('drop', ev => vstavitFoto(ev.dataTransfer.files));
+  drop.addEventListener('drop', async ev => {
+    const dt = ev.dataTransfer;
+    if (dt.files && dt.files.length) return vstavitFoto(dt.files);
+    // перетащили картинку прямо со страницы — пробуем скачать по ссылке
+    const ssylka = (dt.getData('text/uri-list') || dt.getData('text/plain') || '').trim();
+    if (/^https?:\/\//.test(ssylka)) {
+      skazatOshibku('Тяну картинку по ссылке…');
+      try {
+        const r = await fetch(ssylka, { mode:'cors' });
+        const b = await r.blob();
+        if (!b.type.startsWith('image/')) throw new Error('по ссылке не картинка');
+        return vstavitFoto([new File([b], 'so-stranicy.png', { type: b.type })]);
+      } catch (e) {
+        return skazatOshibku('Картинку по ссылке взять не дали (защита сайта). ' +
+          'Сохрани её на диск и перетащи файл.');
+      }
+    }
+    vstavitFoto([]);
+  });
   addEventListener('paste', ev => { if (ev.clipboardData?.files?.length) vstavitFoto(ev.clipboardData.files); });
 
   $('#knSintez').onclick = sintez;
@@ -488,10 +532,19 @@ function start() {
   };
 
   $('#knNastrojki').onclick = () => $('#oknoNastroek').showModal();
+  $('#knProverit').onclick = async () => {
+    const b = $('#knProverit'), p = $('#proverkaKlyucha');
+    b.disabled = true; p.innerHTML = '<div class="podskazka">Спрашиваю Google…</div>';
+    const r = await G.proverit(LS.k, LS.mr, LS.mk);
+    p.innerHTML = r.ok
+      ? `<div class="itog" style="margin-top:9px"><div class="krug">✓</div><div>${r.tekst}</div></div>`
+      : `<div class="oshibka" style="margin-top:9px">${r.tekst}</div>`;
+    b.disabled = false;
+  };
   $('#knZakrytNastrojki').onclick = () => $('#oknoNastroek').close();
   $('#knSpravochnik').onclick = () => $('#oknoSpravochnika').showModal();
   $('#knZakrytSpravochnik').onclick = () => $('#oknoSpravochnika').close();
-  $('#nKlyuch').onchange = e => LS.k = e.target.value.trim();
+  $('#nKlyuch').oninput = e => { LS.k = e.target.value.trim(); $('#proverkaKlyucha').innerHTML = ''; };
   $('#nModelRazbor').onchange = e => { LS.mr = e.target.value; pokazatRashod(); };
   $('#nModelKartinka').onchange = e => { LS.mk = e.target.value; pokazatRashod(); };
   $('#nShablon').onchange = e => {

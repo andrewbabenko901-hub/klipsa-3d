@@ -135,6 +135,36 @@ export const PROMT_SVERKA = `На первом изображении фотог
 
 function chast(b64, mime) { return { inline_data: { mime_type: mime || 'image/png', data: b64 } }; }
 
+// Проверка ключа: спрашиваем список моделей и заодно смотрим, есть ли те,
+// которые выбраны в настройках. Отвечает по-человечески, а не кодом ошибки.
+export async function proverit(klyuch, modelRazbor, modelKartinka) {
+  if (!klyuch) return { ok:false, tekst:'Ключ не введён.' };
+  let r;
+  try {
+    r = await fetch(BAZA.replace(/\/$/,'') + '?pageSize=200', { headers:{ 'x-goog-api-key': klyuch } });
+  } catch (e) {
+    return { ok:false, tekst:'Не достучался до Google: ' + e.message +
+      '. Похоже на блокировку сети или расширение в браузере.' };
+  }
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch { j = null; }
+  if (!r.ok || !j) {
+    const m = (j && j.error && j.error.message) || t.slice(0, 200);
+    if (r.status === 400 || r.status === 403)
+      return { ok:false, tekst:'Ключ не принят (' + r.status + '): ' + m +
+        ' Проверь, что скопирован весь ключ целиком и что у проекта включён Generative Language API.' };
+    return { ok:false, tekst:'Google ответил ' + r.status + ': ' + m };
+  }
+  const vse = (j.models || []).map(x => String(x.name).replace('models/',''));
+  const netR = modelRazbor && !vse.includes(modelRazbor);
+  const netK = modelKartinka && !vse.includes(modelKartinka);
+  let tekst = 'Ключ рабочий, доступно ' + vse.length + ' моделей.';
+  if (netR) tekst += ' Но модели разбора «' + modelRazbor + '» среди них нет.';
+  if (netK) tekst += ' Модели картинки «' + modelKartinka + '» тоже нет.';
+  if (!netR && !netK) tekst += ' Обе выбранные модели на месте — можно работать.';
+  return { ok: !netR, tekst, modeli: vse };
+}
+
 async function poslat(klyuch, model, telo) {
   const r = await fetch(BAZA + encodeURIComponent(model) + ':generateContent', {
     method:'POST',
