@@ -1,0 +1,9 @@
+# ключи и личное — никогда в репозиторий
+.env
+*.key
+klyuch*
+# мусор
+.DS_Store
+Thumbs.db
+node_modules/
+*.log
