@@ -1,4 +1,4 @@
-// Подключение разных нейронок. Один интерфейс, четыре поставщика.
+// Подключение разных нейронок. Один интерфейс, пять поставщиков плюс свой адрес.
 // Ключи живут только в localStorage этого браузера и уходят строго
 // на сервер своего поставщика.
 import { TIPY, SECHENIYA, SHEMA, PROMT_RAZBOR, PROMT_SVERKA, SHEMA_SVERKI } from './shema.js';
@@ -19,6 +19,32 @@ function strogaya(sh) {
 }
 
 const dataUrl = f => 'data:' + (f.mime || 'image/png') + ';base64,' + f.b64;
+
+/**
+ * Ужать снимок под лимит поставщика.
+ * NVIDIA NIM принимает картинку внутри запроса, только пока весь запрос
+ * меньше ~180 КБ; фотография с телефона в это не влезает никогда. Жмём в JPEG,
+ * последовательно уменьшая сторону и качество, пока не поместится.
+ */
+async function szhatFoto(f, predel = 130000) {
+  if (f.b64 && f.b64.length <= predel) return dataUrl(f);
+  const img = f.img || await new Promise((res, rej) => {
+    const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = dataUrl(f);
+  });
+  const c = document.createElement('canvas'), cx = c.getContext('2d');
+  for (const storona of [1400, 1100, 900, 720, 560, 440]) {
+    const k = Math.min(1, storona / Math.max(img.width, img.height));
+    c.width = Math.max(8, Math.round(img.width * k));
+    c.height = Math.max(8, Math.round(img.height * k));
+    cx.fillStyle = '#fff'; cx.fillRect(0, 0, c.width, c.height);
+    cx.drawImage(img, 0, 0, c.width, c.height);
+    for (const kach of [0.9, 0.75, 0.6]) {
+      const u = c.toDataURL('image/jpeg', kach);
+      if (u.length <= predel) return u;
+    }
+  }
+  return c.toDataURL('image/jpeg', 0.5);
+}
 
 async function poslat(url, zagolovki, telo, imya) {
   let r;
@@ -181,6 +207,51 @@ export const POSTAVSHCHIKI = {
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
+  // NVIDIA NIM — каталог build.nvidia.com. Адрес OpenAI-совместимый, запросы
+  // из браузера пропускает (CORS открыт), картинка идёт обычным image_url.
+  // Список моделей отдаётся даже без ключа, поэтому его видно сразу.
+  nvidia: {
+    imya: 'NVIDIA NIM — каталог build.nvidia.com',
+    gdeKlyuch: 'https://build.nvidia.com/settings/api-keys',
+    modeli: ['meta/llama-3.2-90b-vision-instruct','meta/llama-3.2-11b-vision-instruct',
+             'google/gemma-3-12b-it','microsoft/phi-3-vision-128k-instruct','nvidia/neva-22b'],
+    ceny: {},
+    async spisokModeley(klyuch) {
+      const r = await fetch('https://integrate.api.nvidia.com/v1/models',
+                            { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.detail || j?.title || ('HTTP ' + r.status));
+      const vse = (j.data||[]).map(m => m.id);
+      // модальность в списке не указана — отбираем по имени, зрячие вперёд
+      const zryachie = vse.filter(id =>
+        /vision|-vl|vlm|llava|neva|kosmos|fuyu|gemma-3|paligemma|internvl|pixtral|maverick|scout|deplot/i.test(id));
+      const spisok = [...zryachie.sort(), ...vse.filter(id => !zryachie.includes(id)).sort()];
+      spisok.zryachih = zryachie.length;
+      return spisok;
+    },
+    async razobrat(klyuch, model, foto, promt) {
+      const soderzhanie = [];
+      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: await szhatFoto(f) } });
+      soderzhanie.push({ type:'text', text: promt });
+      const zag = { 'Content-Type':'application/json', Accept:'application/json',
+                    Authorization:'Bearer ' + klyuch };
+      const telo = { model, messages:[{ role:'user', content: soderzhanie }],
+                     temperature:0.2, max_tokens:4096 };
+      let j;
+      try {
+        // сначала со строгим JSON: NIM умеет guided_json, но не все модели
+        j = await poslat('https://integrate.api.nvidia.com/v1/chat/completions', zag,
+              Object.assign({}, telo, { nvext:{ guided_json: strogaya(SHEMA) } }), 'NVIDIA');
+      } catch (e) {
+        if (!/nvext|guided|400|422/i.test(e.message)) throw e;
+        j = await poslat('https://integrate.api.nvidia.com/v1/chat/completions', zag, telo, 'NVIDIA');
+      }
+      const u = j.usage || {};
+      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'NVIDIA'),
+               rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
+    },
+  },
+
   // Свой поставщик: любой сервис с OpenAI-совместимым /chat/completions.
   // Адрес и ключ вводит пользователь; ключ хранится в браузере и в код не
   // попадает. Схему ответа шлём мягко (json_object): не все сервисы умеют
@@ -256,7 +327,8 @@ export async function proverit(post, klyuch, model, adres) {
     const est = !model || spisok.includes(model);
     return { ok: est, modeli: spisok, kartinki: spisok.kartinki || [],
       tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей' +
-             (spisok.kartinki && spisok.kartinki.length ? ', из них ' + spisok.kartinki.length + ' рисуют картинки' : '') + '.' +
+             (spisok.kartinki && spisok.kartinki.length ? ', из них ' + spisok.kartinki.length + ' рисуют картинки' : '') +
+             (spisok.zryachih ? ', из них ' + spisok.zryachih + ' видят картинки' : '') + '.' +
              (est ? ' Выбранная модель на месте.' : ' Но модели «' + model + '» среди них нет — список обновлён, выбери из него.') };
   } catch (e) {
     let m = e.message || String(e);
