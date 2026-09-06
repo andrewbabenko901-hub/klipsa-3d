@@ -521,13 +521,24 @@ export async function narisovatCherez(post, klyuch, model, foto, promt, adres) {
       zagolovki['HTTP-Referer'] = location.origin;
       zagolovki['X-Title'] = 'klipsa-3d';
     }
-    const j = await poslat(baza + '/chat/completions', zagolovki,
-      // Потолок ответа обязателен. Без него OpenRouter резервирует под ответ
-      // весь контекст модели — десятки тысяч токенов — и отбивает запрос по
-      // деньгам (402), хотя картинка стоит около 1200 токенов. Даём запас.
-      { model, modalities:['image','text'], max_tokens: 8192,
-        messages:[{ role:'user', content: soderzhanie }] },
-      post === 'svoj' ? 'Свой адрес' : 'OpenRouter');
+    // Потолок ответа обязателен. Без него OpenRouter резервирует под ответ весь
+    // контекст модели — десятки тысяч токенов — и отбивает запрос по деньгам
+    // (402), хотя картинка стоит около 1200 токенов. Ставим 4096 с запасом.
+    // Если на счёте меньше, поставщик прямо пишет, сколько может себе позволить:
+    // берём эту цифру и повторяем один раз. Так рисование живёт до последних
+    // копеек на счёте, а не падает, когда их «почти хватает».
+    const imya = post === 'svoj' ? 'Свой адрес' : 'OpenRouter';
+    const zapros = (mt) => ({ model, modalities:['image','text'], max_tokens: mt,
+                              messages:[{ role:'user', content: soderzhanie }] });
+    const MIN_NA_KARTINKU = 1400;
+    let j;
+    try { j = await poslat(baza + '/chat/completions', zagolovki, zapros(4096), imya); }
+    catch (e) {
+      const mozhno = +((/can only afford\s+(\d+)/i.exec(e.message) || [])[1] || 0);
+      if (!mozhno || mozhno < MIN_NA_KARTINKU) throw e;
+      j = await poslat(baza + '/chat/completions', zagolovki,
+                       zapros(mozhno - 50), imya);
+    }
     const m = j?.choices?.[0]?.message || {};
     const k = (m.images || [])[0];
     const url = k?.image_url?.url || k?.url || (typeof k === 'string' ? k : null);
