@@ -284,3 +284,6 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
 .sovpad .polosa i{display:block;height:100%;width:0;border-radius:99px;
   background:linear-gradient(90deg,#2a8f5e,#3fbf7f);transition:width .35s}
 .sovpad .tiho{margin-top:calc(4px * var(--m))}
+
+/* строка замера под каждым куском */
+.podskazka.zamer{color:#6f8a7e;font-size:calc(9.5px*var(--m));opacity:.85}
