@@ -20,6 +20,7 @@ const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
   rashod: [], granicy: null, nalozhenie: null, masshtab: null,
+  izmery: [], vidy: null, svodkaVidov: null,
 };
 
 // ---------- хранилище ----------
@@ -28,6 +29,7 @@ const LS = {
   s(k, v) { try { localStorage.setItem('klipsa.'+k, JSON.stringify(v)); } catch {} },
   get klyuchi(){ return this.j('klyuchi', {}); }, set klyuchi(v){ this.s('klyuchi', v); },
   get modeli(){ return this.j('modeli', {}); },  set modeli(v){ this.s('modeli', v); },
+  get adresa(){ return this.j('adresa', {}); },  set adresa(v){ this.s('adresa', v); },
   get vkl(){ return this.j('vkl', { gemini:true }); }, set vkl(v){ this.s('vkl', v); },
   get obr(){ return this.j('obr', {}); },        set obr(v){ this.s('obr', v); },
   get plotnost(){ return +(localStorage.getItem('klipsa.plotnost') || 1); },
@@ -94,7 +96,14 @@ function geomRecepta(els) {
   const kuski = [], celoe = []; let y = 0;
   for (const e of els) {
     const g = geometriya(e.kind, e.params), h = vysota(e.kind, e.params);
-    if (g) { kuski.push(g.clone()); const v = g.clone(); v.translate(0,y,0); celoe.push(v); }
+    if (g) {
+      // сплющивание по глубине: круглый элемент так становится овальным.
+      // Деталь перестаёт быть телом вращения, а элементы конструктора
+      // при этом не трогаются — они не мои.
+      const sz = +e.szhatie || 1;
+      if (Math.abs(sz - 1) > 0.01) g.scale(1, 1, sz);
+      kuski.push(g.clone()); const v = g.clone(); v.translate(0,y,0); celoe.push(v);
+    }
     y -= h;
   }
   return { celoe: slozhit(celoe), kuski };
@@ -117,13 +126,22 @@ function pererisovat() {
 // ---------- сверка силуэтов ----------
 // Ответ на «почему модель не похожа на снимок» должен быть не на словах:
 // силуэт модели кладётся на маску снимка и меряется совпадение.
+// Маски всех видов, годных для сверки с моделью: спереди — 0°, сбоку — 90°.
+// Вид сверху так не сравнить, он служит только для формы сечения.
+function maskiVidov() {
+  const UGOL = { speredi: 0, sboku: 90 };
+  return (S.izmery || []).filter(v => v.izmer && UGOL[v.rol] !== undefined)
+    .map(v => ({ rol: v.rol, ugol: UGOL[v.rol], maska: O.maskaVyravnennaya(v.izmer) }))
+    .filter(v => v.maska);
+}
+
 function sverkaSiluetov(geom) {
-  S.nalozhenie = null;
+  S.nalozhenie = null; S.svodkaVidov = null;
   if (!S.izmer || !geom) { pokazatSovpadenie(); return; }
   try {
-    const fot = O.maskaVyravnennaya(S.izmer);
-    const mod = SIL.siluetGeometrii(geom);
-    S.nalozhenie = SIL.sravnit(fot, mod);
+    const vidy = maskiVidov();
+    const sv = SIL.sravnitVidy(vidy, geom);
+    if (sv) { S.svodkaVidov = sv; S.nalozhenie = sv.glavnyj; }
   } catch (e) { S.nalozhenie = null; }
   pokazatSovpadenie();
 }
@@ -135,10 +153,17 @@ function pokazatSovpadenie() {
   if (!n) return;
   $('#sovpadPolosa').style.width = Math.round(n.iou*100) + '%';
   const raz = Math.abs(n.vysotaModeli - n.vysotaFoto) / Math.max(n.vysotaFoto, 1e-6);
+  const sv = S.svodkaVidov;
+  const poVidam = sv && sv.vidy.length > 1
+    ? '<br>' + sv.vidy.map(v => (v.rol === 'sboku' ? 'сбоку' : 'спереди') + ' ' +
+        Math.round(v.iou*100) + '%').join(' · ')
+    : '';
+  const obshch = sv ? sv.iou : n.iou;
+  $('#sovpadPolosa').style.width = Math.round(obshch*100) + '%';
   $('#sovpadPod').innerHTML =
-    'Силуэт совпал с фото на <b>' + Math.round(n.iou*100) + '%</b> · ' +
+    'Силуэт совпал с фото на <b>' + Math.round(obshch*100) + '%</b> · ' +
     'модель добавила лишнего ' + Math.round(n.lishneeVModeli*100) + '%, ' +
-    'не построила ' + Math.round(n.netVModeli*100) + '%' +
+    'не построила ' + Math.round(n.netVModeli*100) + '%' + poVidam +
     (raz > 0.12 ? '<br>пропорции разошлись на ' + Math.round(raz*100) + '% по высоте' : '');
 }
 
@@ -152,14 +177,31 @@ function nastrojkiObrabotki() {
 }
 function zapomnitObrabotku() { LS.obr = Object.assign(nastrojkiObrabotki(), { chuvst:+$('#oChuvst').value }); }
 
+/**
+ * Обмер всех загруженных видов, а не только первого.
+ * Вид спереди даёт все диаметры и длины, вид сбоку — сечение: если ширина
+ * сбоку не равна ширине спереди, деталь не тело вращения.
+ */
 function obmerit(tiho) {
   if (!S.foto.length) { if (!tiho) skazatOshibku('Сначала загрузи фото.', true); return null; }
-  try {
-    S.izmer = O.obmerit(S.foto[0].img, nastrojkiObrabotki());
-    const nm = A.METODY_MASKI[S.izmer.metod];
-    if (nm) $('#znMetod').textContent = nm.split(' —')[0].toLowerCase();
-    return S.izmer;
-  } catch (e) { skazatOshibku('Обмер не вышел: ' + e.message); return null; }
+  const nastr = nastrojkiObrabotki();
+  S.izmery = [];
+  S.foto.forEach((f, i) => {
+    if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
+    try { S.izmery.push({ rol: f.rol, nomer: i+1, izmer: O.obmerit(f.img, nastr) }); }
+    catch (e) { S.izmery.push({ rol: f.rol, nomer: i+1, izmer: null, sboj: e.message }); }
+  });
+  const vid = r => (S.izmery.find(v => v.rol === r) || {}).izmer || null;
+  S.izmer = vid('speredi') || (S.izmery.find(v => v.izmer) || {}).izmer || null;
+  if (!S.izmer) {
+    if (!tiho) skazatOshibku('Обмер не вышел: ' + (S.izmery[0]?.sboj || 'деталь не найдена'));
+    return null;
+  }
+  S.vidy = O.sopostavitVidy(S.izmer, vid('sboku'));
+  const nm = A.METODY_MASKI[S.izmer.metod];
+  if (nm) $('#znMetod').textContent = nm.split(' —')[0].toLowerCase();
+  $('#znVidov').textContent = S.izmery.filter(v => v.izmer).length;
+  return S.izmer;
 }
 
 /**
@@ -173,13 +215,13 @@ function razborAlgoritmom() {
   let tela = O.razborAlgoritmom(S.izmer, chuvst);
   let podpis = 'изломы профиля', uver = 0.6, iou = 0;
   try {
-    const fot = O.maskaVyravnennaya(S.izmer);
+    const vidyM = maskiVidov();
     const varianty = O.variantyRazbora(S.izmer);
     let luchshee = -1, luchshie = null, luchshieIou = 0;
     for (const v of varianty) {
-      const sb = sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm);
+      const sb = sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm, S.vidy);
       const g = geomRecepta(sb.els).celoe;
-      const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
+      const sv = SIL.sravnitVidy(vidyM, g, 140, 180);
       if (g && g.dispose) g.dispose();
       // небольшой штраф за лишние тела: рецепт из восьми кусков ради лишнего
       // процента совпадения — это не модель, а мозаика
@@ -205,7 +247,7 @@ function peresobrat() {
   if (!S.tela.length || !S.izmer) return;
   const kat = katalog();
   S.masshtab = masshtab(kat, S.izmer, S.tela);
-  const r = sobrat(S.tela, S.izmer, S.masshtab.mm);
+  const r = sobrat(S.tela, S.izmer, S.masshtab.mm, S.vidy);
   S.els = r.els; S.zam = r.zam.concat(podognat(S.els, kat, S.izmer, S.masshtab));
   S.granicy = O.granicyTel(S.izmer.polosy, S.tela.map(t => Math.max(0.02, +t.dolyaVysoty||0.1)));
   pererisovat(); pokazatRezultat(); $('#znKuskov').textContent = S.tela.length;
@@ -402,7 +444,7 @@ function vstavitFoto(files) {
     fr.onload = () => {
       const im = new Image();
       im.onload = () => { S.foto.push({ url:fr.result, img:im, imya:f.name,
-        b64:fr.result.split(',')[1], mime:f.type }); pokazatFoto(); if (S.foto.length===1) obmerit(true) && risovatMasku(); };
+        b64:fr.result.split(',')[1], mime:f.type }); pokazatFoto(); if (obmerit(true)) { peresobrat(); risovatMasku(); } };
       im.src = fr.result;
     };
     fr.readAsDataURL(f);
@@ -417,15 +459,39 @@ function risovatMasku() {
   const k = Math.max(1, Math.min(2.4, 1200 / rw));   // без искажения пропорций
   const w = Math.round(rw * k), h = Math.round(rh * k);
   if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-  O.narisovatRazbor(cv, S.izmer, S.granicy,
-    { shirinaMm: +$('#pGolova').value || 0, nalozhenie: S.nalozhenie });
+  // на два-три вида нужно больше высоты, иначе картинки сжимаются в марки
+  const vsegoVidov = (S.izmery || []).filter(v => v.izmer).length || 1;
+  box.classList.toggle('vidov2', vsegoVidov === 2);
+  box.classList.toggle('vidov3', vsegoVidov >= 3);
+  const nalPoRoli = {};
+  if (S.svodkaVidov) for (const x of S.svodkaVidov.vidy) nalPoRoli[x.rol] = x;
+  const vidy = (S.izmery || []).filter(v => v.izmer).map(v =>
+    ({ rol: v.rol, izmer: v.izmer, granicy: S.granicy, nal: nalPoRoli[v.rol] || null }));
+  const shirMm = S.masshtab ? S.masshtab.mm : (+$('#pGolova').value || 0);
+  O.narisovatRazbor(cv, S.izmer, S.granicy, {
+    shirinaMm: shirMm,
+    vysotaMm: shirMm * (S.izmer.vysotaKShirine || 1),   // высота у всех видов одна
+    nalozhenie: S.nalozhenie,
+    vidy: vidy.length ? vidy : null,
+    sechenie: S.vidy
+      ? (S.vidy.teloVrashcheniya
+         ? 'по двум видам это тело вращения'
+         : 'НЕ тело вращения: ' + Math.round(S.vidy.dolyaNekruglyh*100) +
+           '% высоты сбоку в ' + S.vidy.krajnee.toFixed(2) + ' раза ' +
+           (S.vidy.krajnee < 1 ? 'уже' : 'шире') + ', чем спереди')
+      : 'второго вида нет — сечение не проверено, принято круглое',
+  });
 }
 function pokazatFoto() {
   const m = $('#mini'); m.innerHTML = '';
   S.foto.forEach((f, i) => {
     const fg = document.createElement('figure');
-    fg.innerHTML = `<img src="${f.url}" alt=""><figcaption>#${i+1}</figcaption><button class="x">✕</button>`;
-    fg.querySelector('.x').onclick = () => { S.foto.splice(i,1); pokazatFoto(); };
+    if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
+    fg.innerHTML = `<img src="${f.url}" alt=""><button class="x">✕</button>
+      <figcaption><select class="rol">${Object.entries(O.ROLI).map(([k,v]) =>
+        `<option value="${k}"${k===f.rol?' selected':''}>${v.split(' —')[0]}</option>`).join('')}</select></figcaption>`;
+    fg.querySelector('.x').onclick = () => { S.foto.splice(i,1); pokazatFoto(); if (S.foto.length) { obmerit(true); peresobrat(); risovatMasku(); } };
+    fg.querySelector('.rol').onchange = e => { f.rol = e.target.value; obmerit(true); peresobrat(); risovatMasku(); };
     m.appendChild(fg);
   });
 }
@@ -475,7 +541,9 @@ async function sintez() {
       const otvety = await Promise.all(kogo.map(async post => {
         const model = modeli[post] || N.POSTAVSHCHIKI[post].modeli[0];
         try {
-          const r = await N.razobrat(post, klyuchi[post].trim(), model, S.foto, dop);
+          if (!model) throw new Error('не задано имя модели — впиши его в «Нейронки и ключи»');
+          const r = await N.razobrat(post, klyuchi[post].trim(), model, S.foto, dop,
+                                     (LS.adresa[post]||'').trim());
           r.ves = 1; S.rashod.push({ istochnik:r.istochnik, post, model, rashod:r.rashod });
           return r;
         } catch (e) {
@@ -604,9 +672,16 @@ function pokazatPostavshchikov() {
         <div class="pole"><label>Ключ</label>
           <input type="password" data-klyuch value="${(klyuchi[id]||'').replace(/"/g,'&quot;')}" placeholder="вставь ключ" autocomplete="off"></div>
         <div class="pole"><label>Модель</label>
-          <select data-model>${p.modeli.map(m=>`<option${m===(modeli[id]||p.modeli[0])?' selected':''}>${m}</option>`).join('')}</select></div>
+          ${p.svoyAdres
+            ? `<input type="text" data-modelsvoj value="${(modeli[id]||'').replace(/"/g,'&quot;')}" placeholder="имя модели">`
+            : `<select data-model>${p.modeli.map(m=>`<option${m===(modeli[id]||p.modeli[0])?' selected':''}>${m}</option>`).join('')}</select>`}</div>
       </div>
-      <div class="podskazka">Ключ: <a href="${p.gdeKlyuch}" target="_blank" rel="noopener">${p.gdeKlyuch.replace('https://','')}</a></div>
+      ${p.svoyAdres ? `<div class="pole" style="margin-top:7px"><label>Адрес API</label>
+        <input type="text" data-adres value="${(LS.adresa[id]||'').replace(/"/g,'&quot;')}"
+               placeholder="https://api.pexels.com/v1  или  https://свой-сервер/v1"></div>` : ''}
+      <div class="podskazka">${p.svoyAdres
+        ? 'Любой сервис с методом <b>/chat/completions</b> как у OpenAI. Адрес — до /chat/completions, например <b>https://хост/v1</b>. Ключ хранится только в этом браузере.'
+        : `Ключ: <a href="${p.gdeKlyuch}" target="_blank" rel="noopener">${p.gdeKlyuch.replace('https://','')}</a>`}</div>
       <div data-otvet></div>`;
     d.querySelector('[data-klyuch]').oninput = e => {
       const k = LS.klyuchi; k[id] = e.target.value.trim(); LS.klyuchi = k;
@@ -614,16 +689,24 @@ function pokazatPostavshchikov() {
       d.querySelector('[data-otvet]').innerHTML = '';
       obnovitKtoSprashivat();
     };
-    d.querySelector('[data-model]').onchange = e => { const m = LS.modeli; m[id] = e.target.value; LS.modeli = m; obnovitKtoSprashivat(); };
+    const polModeli = d.querySelector('[data-model]') || d.querySelector('[data-modelsvoj]');
+    polModeli.oninput = polModeli.onchange = e => {
+      const m = LS.modeli; m[id] = e.target.value; LS.modeli = m; obnovitKtoSprashivat(); };
+    const polAdres = d.querySelector('[data-adres]');
+    if (polAdres) polAdres.oninput = e => {
+      const a = LS.adresa; a[id] = e.target.value.trim(); LS.adresa = a;
+      d.querySelector('[data-otvet]').innerHTML = ''; };
     d.querySelector('[data-vkl]').onchange = e => { const v = LS.vkl; v[id] = e.target.checked; LS.vkl = v; obnovitKtoSprashivat(); };
     d.querySelector('[data-pr]').onclick = async ev => {
       const b = ev.target, o = d.querySelector('[data-otvet]');
       b.disabled = true; o.innerHTML = '<div class="podskazka">Спрашиваю…</div>';
-      const r = await N.proverit(id, (LS.klyuchi[id]||'').trim(), LS.modeli[id] || p.modeli[0]);
+      const r = await N.proverit(id, (LS.klyuchi[id]||'').trim(),
+                                 LS.modeli[id] || p.modeli[0], (LS.adresa[id]||'').trim());
       o.innerHTML = r.ok ? `<div class="itog" style="margin-top:7px"><div class="krug">✓</div><div>${r.tekst}</div></div>`
                          : `<div class="oshibka" style="margin-top:7px">${r.tekst}</div>`;
-      if (r.modeli?.length) {
-        const sel = d.querySelector('[data-model]'), bylo = sel.value;
+      const sel = d.querySelector('[data-model]');
+      if (r.modeli?.length && sel) {
+        const bylo = sel.value;
         const nabor = [...new Set([...p.modeli, ...r.modeli])].filter(m => r.modeli.includes(m));
         sel.innerHTML = (nabor.length ? nabor : r.modeli).map(m => `<option${m===bylo?' selected':''}>${m}</option>`).join('');
       }
@@ -638,7 +721,7 @@ function obnovitKtoSprashivat() {
     const est = !!(klyuchi[id]||'').trim();
     return `<label class="stroka"><input type="checkbox" data-p="${id}" ${vkl[id]&&est?'checked':''} ${est?'':'disabled'}>
       <span class="tochka ${est?'est':''}"></span>${p.imya}
-      <span class="klyuch">${est ? (modeli[id]||p.modeli[0]) : 'нет ключа'}</span></label>`;
+      <span class="klyuch">${est ? (modeli[id]||p.modeli[0]||'модель не задана') : 'нет ключа'}</span></label>`;
   }).join('');
   k.querySelectorAll('input[data-p]').forEach(i => i.onchange = e => {
     const v = LS.vkl; v[e.target.dataset.p] = e.target.checked; LS.vkl = v; obnovitKtoSprashivat();
@@ -664,12 +747,12 @@ function pokazatSpravochnik() {
  */
 function ocenitVariantySiluetom(varianty) {
   if (!S.izmer) return;
-  let fot; try { fot = O.maskaVyravnennaya(S.izmer); } catch { return; }
+  let vidyM; try { vidyM = maskiVidov(); } catch { return; }
   for (const v of varianty) {
     if (!v.tela || !v.tela.length) continue;
     try {
-      const g = geomRecepta(sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm).els).celoe;
-      const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
+      const g = geomRecepta(sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm, S.vidy).els).celoe;
+      const sv = SIL.sravnitVidy(vidyM, g, 140, 180);
       if (g && g.dispose) g.dispose();
       if (sv) { v.iou = sv.iou; v.ves = (v.ves || 1) * (0.6 + 0.8*sv.iou); }
     } catch {}
@@ -686,8 +769,7 @@ async function podognatPoFoto() {
   kn.disabled = true; kn.textContent = 'Подгоняю…';
   await new Promise(r => setTimeout(r, 30));
   try {
-    const fot = O.maskaVyravnennaya(S.izmer);
-    const r = SIL.podognatPoFoto(S.els, fot, spisok => geomRecepta(spisok).celoe);
+    const r = SIL.podognatPoFoto(S.els, maskiVidov(), spisok => geomRecepta(spisok).celoe);
     if (r.stalo > r.bylo + 0.002) {
       // совпадение силуэта считается с нормировкой по ширине, поэтому подгонка
       // может незаметно раздуть или сжать всю деталь. Возвращаем габарит на

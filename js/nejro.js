@@ -170,17 +170,59 @@ export const POSTAVSHCHIKI = {
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
+  // Свой поставщик: любой сервис с OpenAI-совместимым /chat/completions.
+  // Адрес и ключ вводит пользователь; ключ хранится в браузере и в код не
+  // попадает. Схему ответа шлём мягко (json_object): не все сервисы умеют
+  // строгие json_schema, а разбор ответа у нас всё равно свой.
+  svoj: {
+    imya: 'Свой API — любой OpenAI-совместимый адрес',
+    gdeKlyuch: '',
+    svoyAdres: true,
+    modeli: [],
+    ceny: {},
+    async spisokModeley(klyuch, adres) {
+      const u = bazaSvoego(adres);
+      const r = await fetch(u + '/models', { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
+      const spisok = (j.data || j.models || []).map(m => m.id || m.name).filter(Boolean).sort();
+      if (!spisok.length) throw new Error('адрес ответил, но список моделей пуст');
+      return spisok;
+    },
+    async razobrat(klyuch, model, foto, promt, adres) {
+      const soderzhanie = [{ type:'text', text: promt }];
+      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+      const j = await poslat(bazaSvoego(adres) + '/chat/completions',
+        { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch },
+        { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
+          response_format:{ type:'json_object' } },
+        'Свой API');
+      const u = j.usage || {};
+      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Свой API'),
+               rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
+    },
+  },
 };
+
+// Приводим введённый адрес к базе: с протоколом, без хвостового слэша и без
+// уже дописанного /chat/completions.
+export function bazaSvoego(adres) {
+  let u = String(adres || '').trim();
+  if (!u) throw new Error('не задан адрес своего API');
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  u = u.replace(/\/+$/, '').replace(/\/chat\/completions$/i, '').replace(/\/models$/i, '');
+  return u;
+}
 
 // ---------- общее ----------
 
-export async function razobrat(post, klyuch, model, foto, dopolnenie) {
+export async function razobrat(post, klyuch, model, foto, dopolnenie, adres) {
   const p = POSTAVSHCHIKI[post];
   if (!p) throw new Error('неизвестный поставщик: ' + post);
   if (!klyuch) throw new Error(p.imya + ': нет ключа');
   const promt = PROMT_RAZBOR + (dopolnenie ? '\n\n' + dopolnenie : '');
   const t0 = performance.now();
-  const r = await p.razobrat(klyuch, model, foto, promt);
+  const r = await p.razobrat(klyuch, model, foto, promt, adres);
   const tela = (r.dannye?.tela || []).slice().sort((a,b) => (a.nomer||0) - (b.nomer||0));
   tela.forEach((t, i) => { t.nomer = i+1; t.istochnik = p.imya + ' · ' + model; });
   return {
@@ -192,12 +234,14 @@ export async function razobrat(post, klyuch, model, foto, dopolnenie) {
   };
 }
 
-export async function proverit(post, klyuch, model) {
+export async function proverit(post, klyuch, model, adres) {
   const p = POSTAVSHCHIKI[post];
   if (!p) return { ok:false, tekst:'неизвестный поставщик' };
   if (!klyuch) return { ok:false, tekst:p.imya + ': ключ не введён.' };
+  if (p.svoyAdres && !String(adres||'').trim())
+    return { ok:false, tekst:'Не задан адрес своего API — впиши его рядом с ключом.' };
   try {
-    const spisok = await p.spisokModeley(klyuch);
+    const spisok = await p.spisokModeley(klyuch, adres);
     const est = !model || spisok.includes(model);
     return { ok: est, modeli: spisok,
       tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей.' +

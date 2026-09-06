@@ -17,14 +17,20 @@ function podgotovit() {
   plosk = document.createElement('canvas');
 }
 
-/** Силуэт геометрии сбоку. Возвращает маску 0/1 уже обрезанную по детали. */
-export function siluetGeometrii(geom, SW = 260) {
+/**
+ * Силуэт геометрии. `ugol` 0 — вид спереди (смотрим вдоль Z), 90 — вид сбоку
+ * (вдоль X). Ширина кадра берётся по нужной оси, а не по большей из двух:
+ * иначе сплющенная модель в профиль показывалась бы с полями.
+ */
+export function siluetGeometrii(geom, SW = 260, ugol = 0) {
   if (!geom) return null;
   podgotovit();
   geom.computeBoundingBox();
   const bb = geom.boundingBox;
   const sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y, sz = bb.max.z - bb.min.z;
-  const w = Math.max(sx, sz, 1e-6), h = Math.max(sy, 1e-6);
+  const rad = ugol * Math.PI / 180;
+  const w = Math.max(1e-6, Math.abs(sx*Math.cos(rad)) + Math.abs(sz*Math.sin(rad)));
+  const h = Math.max(sy, 1e-6);
   const W = SW, H = Math.max(8, Math.min(1400, Math.round(SW * h / w)));
 
   if (mesh) { scena.remove(mesh); mesh.material.dispose(); mesh = null; }
@@ -34,7 +40,9 @@ export function siluetGeometrii(geom, SW = 260) {
   scena.add(mesh);
 
   kam.left = -w/2; kam.right = w/2; kam.top = h/2; kam.bottom = -h/2;
-  kam.position.set(0, 0, Math.max(w, h) * 4);
+  const dal = Math.max(sx, sy, sz) * 4;
+  kam.position.set(Math.sin(rad)*dal, 0, Math.cos(rad)*dal);
+  kam.up.set(0, 1, 0);
   kam.lookAt(0, 0, 0);
   kam.updateProjectionMatrix();
 
@@ -105,6 +113,27 @@ export function sravnit(fot, mod, G = 200) {
   };
 }
 
+/**
+ * Сверка сразу по нескольким видам. `vidy` — [{maska, ugol, rol}].
+ * Совпадение считается по каждому виду отдельно и усредняется: круглая модель
+ * может идеально лечь на вид спереди и развалиться на виде сбоку — вот это и
+ * ловится.
+ */
+export function sravnitVidy(vidy, geom, G = 200, SW = 260) {
+  const est = (vidy || []).filter(v => v && v.maska && v.maska.W > 1);
+  if (!est.length || !geom) return null;
+  const shtuki = [];
+  for (const v of est) {
+    const s = sravnit(v.maska, siluetGeometrii(geom, SW, v.ugol || 0), G);
+    if (s) shtuki.push(Object.assign({ rol: v.rol, ugol: v.ugol || 0 }, s));
+  }
+  if (!shtuki.length) return null;
+  const sr = k => shtuki.reduce((a, b) => a + b[k], 0) / shtuki.length;
+  return { vidy: shtuki, iou: sr('iou'),
+           netVModeli: sr('netVModeli'), lishneeVModeli: sr('lishneeVModeli'),
+           glavnyj: shtuki[0] };
+}
+
 // ---------- автоподгонка ----------
 
 // что можно двигать: только размеры, не количества
@@ -117,14 +146,16 @@ const TYANEM = ['d','dLow','dCore','dBore','len','t','t2','h','w','l','span','wi
  * Нейронка даёт структуру, обмер — первые числа, а это доводит числа по картинке.
  */
 export function podognatPoFoto(els, fot, stroit, opt = {}) {
+  // fot — либо одна маска, либо массив видов [{maska, ugol}]
+  const spisok = Array.isArray(fot) ? fot : [{ maska: fot, ugol: 0 }];
   const shagi = opt.shagi || [0.86, 0.93, 1.07, 1.16];
   const prohodov = opt.prohodov || 3;
   const kopiya = els.map(e => ({ kind: e.kind, params: Object.assign({}, e.params) }));
   const ishod = kopiya.map(e => Object.assign({}, e.params));
 
-  const ocenka = (spisok) => {
-    const g = stroit(spisok);
-    const s = sravnit(fot, siluetGeometrii(g, 170), 140);
+  const ocenka = (nabor) => {
+    const g = stroit(nabor);
+    const s = sravnitVidy(spisok, g, 140, 170);
     if (g && g.dispose) g.dispose();
     return s ? s.iou : 0;
   };

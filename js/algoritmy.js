@@ -272,6 +272,26 @@ export function mediana(a) {
   return s.length % 2 ? s[(s.length-1)/2] : (s[s.length/2-1] + s[s.length/2])/2;
 }
 
+/**
+ * Внутренние грани: перепады яркости ВНУТРИ детали, а не её наружный контур.
+ * По ним видно рёбра, ступеньки, прорези и просвечивающие части — деталь
+ * перестаёт быть сплошным закрашенным пятном.
+ */
+export function vnutrenniyeGrani(px, W, H, metka, nom, porog = 26) {
+  const g = new Uint8Array(W*H);
+  const ya = i => px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
+  for (let y = 2; y < H-2; y++) for (let x = 2; x < W-2; x++) {
+    const i = y*W + x;
+    if (metka[i] !== nom) continue;
+    // пиксели у самого края детали пропускаем: там наружный контур
+    if (metka[i-1] !== nom || metka[i+1] !== nom || metka[i-W] !== nom || metka[i+W] !== nom) continue;
+    const gx = -ya(i-W-1) - 2*ya(i-1) - ya(i+W-1) + ya(i-W+1) + 2*ya(i+1) + ya(i+W+1);
+    const gy = -ya(i-W-1) - 2*ya(i-W) - ya(i-W+1) + ya(i+W-1) + 2*ya(i+W) + ya(i+W+1);
+    if (Math.hypot(gx, gy) > porog) g[i] = 1;
+  }
+  return g;
+}
+
 // ---------- контур ----------
 
 // Обход границы по Муру. Даёт замкнутый контур детали.

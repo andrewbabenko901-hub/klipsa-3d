@@ -6,6 +6,12 @@ import { ELEMENTY, vysota } from './elementy.js';
 // примитив -> элемент конструктора. Ключ "тип|сечение", запасной "тип|*".
 export const KARTA = {
   'disk|*':'head_disc', 'shlyapka_disk|*':'head_disc', 'shlyapka_kupol|*':'head_dome',
+  // сечение — не украшение: оно выбирает другой элемент, а не только подпись
+  'disk|pryamougolnoe':'head_rect', 'shlyapka_disk|pryamougolnoe':'head_rect',
+  'shlyapka_kupol|pryamougolnoe':'head_rect', 'disk|mnogogrannik':'nut_hex',
+  'shlyapka_disk|mnogogrannik':'nut_hex', 'disk|trubchatoe':'washer_flat',
+  'shlyapka_disk|trubchatoe':'washer_flat', 'plita|pryamougolnoe':'head_rect',
+  'shejka|trubchatoe':'bushing', 'vorotnik|trubchatoe':'bushing',
   'shlyapka_vint|*':'head_screw', 'plita|*':'head_rect', 'ploshchadka|*':'plate_hole',
   'shajba|*':'washer_flat', 'gajka|*':'nut_hex',
   'shejka|*':'stem_plain', 'shejka|razreznoe':'stem_split',
@@ -69,7 +75,14 @@ export function masshtab(katalog, izmer, tela) {
  * Всё, чего на одном виде не видно (глубина прямоугольной головы, толщина
  * стенки, толщина ребра), помечается как принятое и уходит в «Додумано».
  */
-export function sobrat(tela, izmer, razmerMm) {
+// Насколько сплющить круглый элемент по глубине, если второго вида нет,
+// а сечение названо. Это допущение, и оно так и подписано.
+const SZHATIE_PO_SECHENIYU = { oval: 0.62, pryamougolnoe: 0.62, srezannoe_ploskostyami: 0.82 };
+
+const med = a => { if (!a.length) return 1; const q = a.slice().sort((x,y)=>x-y);
+  return q.length % 2 ? q[(q.length-1)/2] : (q[q.length/2-1] + q[q.length/2])/2; };
+
+export function sobrat(tela, izmer, razmerMm, vidy) {
   const shirMm = Math.max(1, +razmerMm || 16);
   const vysMm  = shirMm * (izmer.vysotaKShirine || 1);
   const doli = tela.map(t => Math.max(0.02, +t.dolyaVysoty || 0.1));
@@ -102,17 +115,36 @@ export function sobrat(tela, izmer, razmerMm) {
     const nog  = Math.max(2, (t.rebra | 0) || M.kuskov || 2);
     const zaz  = zazM ? Math.max(0.3, zazM / nog) : 0;    // на один просвет
 
-    let k = elementDlya(t.tip, t.sechenie);
+    const zub = Math.max(0, t.zubcov | 0);
+    const nomer = 'тело ' + (i+1);
+
+    // ---- сечение: тело вращения или нет ----
+    // Второй снимок даёт отношение «ширина сбоку / ширина спереди» на каждой
+    // полосе. Единица — тело вращения; всё остальное надо сплющить по глубине.
+    let szhatie = 1, sechenie = t.sechenie, otkudaSech = '';
+    if (vidy && vidy.otnoshenie && vidy.otnoshenie.length) {
+      const o = med(vidy.otnoshenie.slice(a, b).filter(v => v > 0));
+      if (isFinite(o) && Math.abs(o - 1) >= 0.12) {
+        szhatie = Math.max(0.2, Math.min(5, o));
+        if (!sechenie || sechenie === 'krugloe') sechenie = 'oval';
+        otkudaSech = 'по двум видам: сбоку в ' + o.toFixed(2) + ' раза ' +
+                     (o < 1 ? 'уже' : 'шире') + ', чем спереди';
+      } else otkudaSech = 'по двум видам: сечение круглое';
+    } else if (SZHATIE_PO_SECHENIYU[sechenie]) {
+      szhatie = SZHATIE_PO_SECHENIYU[sechenie];
+      dopusk(nomer + ': сечение «' + sechenie + '», второго вида нет — глубина принята ' +
+             Math.round(szhatie*100) + '% от ширины');
+    }
+
+    let k = elementDlya(t.tip, sechenie);
     // если на снимке в этом куске видна дырка, а выбранный элемент отверстия
     // не умеет — берём тот, который умеет. Это замер, а не догадка.
     if (dyra >= 0.08 * shirMm) {
       const sOtv = { head_disc: 'washer_flat', head_dome: 'washer_flat',
                      head_rect: 'plate_hole', head_screw: 'washer_flat' }[k];
-      if (sOtv) { k = sOtv; zam.push('тело ' + (i+1) + ': на снимке видна дырка Ø' +
-        dyra.toFixed(1) + ' мм — взят ' + sOtv + ' вместо ' + elementDlya(t.tip, t.sechenie)); }
+      if (sOtv) { k = sOtv; zam.push(nomer + ': на снимке видна дырка Ø' +
+        dyra.toFixed(1) + ' мм — взят ' + sOtv + ' вместо ' + elementDlya(t.tip, sechenie)); }
     }
-    const zub = Math.max(0, t.zubcov | 0);
-    const nomer = 'тело ' + (i+1);
     let p;
 
     switch (k) {
@@ -124,8 +156,11 @@ export function sobrat(tela, izmer, razmerMm) {
         p = { d: ok(D,'d'), dBore: ok(dyra || D*0.35,'dBore'), t: ok(L,'t') }; break;
 
       case 'head_rect':
-        dopusk(nomer + ': глубина прямоугольной головы на одном виде не видна — принята 0.55 длины');
-        p = { w: ok(D*0.55,'w'), l: ok(D,'l'), t: ok(L,'t') }; break;
+        // глубину прямоугольной головы даёт второй вид; без него это допущение
+        if (szhatie !== 1 && vidy) { p = { w: ok(D*szhatie,'w'), l: ok(D,'l'), t: ok(L,'t') }; szhatie = 1; }
+        else { dopusk(nomer + ': глубина прямоугольной головы на одном виде не видна — принята 0.55 длины');
+               p = { w: ok(D*0.55,'w'), l: ok(D,'l'), t: ok(L,'t') }; }
+        break;
 
       case 'head_screw':
         p = { d: ok(D,'d'), t: ok(L,'t'), drive:'torx' }; break;
@@ -239,7 +274,9 @@ export function sobrat(tela, izmer, razmerMm) {
         p = { d: ok(D,'d'), len: ok(L,'len') };
     }
 
-    els.push({ kind: k, params: p, primitiv: t, zamer: M });
+    els.push({ kind: k, params: p, primitiv: t, zamer: M,
+               szhatie: +szhatie.toFixed(3), sechenie, otkudaSech });
+    if (otkudaSech && i === 0) zam.push('сечение ' + otkudaSech);
     if ((t.uverennost ?? 1) < 0.6)
       zam.push(nomer + ' (' + t.tip + '/' + t.sechenie + '): низкая уверенность');
   });
