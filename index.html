@@ -10,20 +10,21 @@
 {"imports":{
   "three":"./vendor/three/three.module.js",
   "three/addons/":"./vendor/three/addons/",
-  "./js/algoritmy.js":"./js/algoritmy.js?v=16",
-  "./js/kruglost.js":"./js/kruglost.js?v=16",
-  "./js/objyom.js":"./js/objyom.js?v=16",
-  "./js/elementy.js":"./js/elementy.js?v=16",
-  "./js/geom.js":"./js/geom.js?v=16",
-  "./js/konsensus.js":"./js/konsensus.js?v=16",
-  "./js/nejro.js":"./js/nejro.js?v=16",
-  "./js/obmer.js":"./js/obmer.js?v=16",
-  "./js/sborka.js":"./js/sborka.js?v=16",
-  "./js/shema.js":"./js/shema.js?v=16",
-  "./js/siluet.js":"./js/siluet.js?v=16",
-  "./js/stl.js":"./js/stl.js?v=16",
-  "./js/vidy.js":"./js/vidy.js?v=16",
-  "./js/main.js":"./js/main.js?v=16"
+  "./js/algoritmy.js":"./js/algoritmy.js?v=18",
+  "./js/kruglost.js":"./js/kruglost.js?v=18",
+  "./js/objyom.js":"./js/objyom.js?v=18",
+  "./js/narezka.js":"./js/narezka.js?v=18",
+  "./js/elementy.js":"./js/elementy.js?v=18",
+  "./js/geom.js":"./js/geom.js?v=18",
+  "./js/konsensus.js":"./js/konsensus.js?v=18",
+  "./js/nejro.js":"./js/nejro.js?v=18",
+  "./js/obmer.js":"./js/obmer.js?v=18",
+  "./js/sborka.js":"./js/sborka.js?v=18",
+  "./js/shema.js":"./js/shema.js?v=18",
+  "./js/siluet.js":"./js/siluet.js?v=18",
+  "./js/stl.js":"./js/stl.js?v=18",
+  "./js/vidy.js":"./js/vidy.js?v=18",
+  "./js/main.js":"./js/main.js?v=18"
 }}
 </script>
 </head>
@@ -33,7 +34,7 @@
   <div class="znak">K</div>
   <div class="rastyanut">
     <h1>Разбор клипсы — 3D по фотографии</h1>
-    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v16</span></div>
+    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v18</span></div>
   </div>
   <div class="prav">
     <div class="plotnost" title="Плотность вёрстки">
@@ -62,6 +63,22 @@
           <input type="file" id="fajly" accept="image/*" multiple hidden>
         </div>
         <div class="mini" id="mini"></div>
+
+        <div class="listBlok">
+          <div class="dropzona mal" id="dropList">
+            Лист с видами от нейронки<br><span class="tiho">нарисовал сам по шаблону — брось файл сюда, разрежу</span>
+            <input type="file" id="fajlList" accept="image/*" hidden>
+          </div>
+          <div class="mini" id="listVidy"></div>
+          <div class="tiho" id="listItog"></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="knopka mal" id="knVzyatVidy">Взять виды</button>
+            <button class="knopka mal" id="knUbratList">Убрать лист</button>
+          </div>
+          <div class="podskazka">Виды с листа меряются наравне со снимком. Если вид спереди
+            с листа не ляжет на фотографию — весь лист отбрасывается, и обмер идёт по фото.</div>
+        </div>
+
         <div class="pole" style="margin-top:10px"><label>Номер / артикул</label>
           <input type="text" id="pNomer" placeholder="Auveco 24484"></div>
         <div class="para" style="margin-top:8px">
@@ -261,9 +278,23 @@
         <input type="text" id="nRisAdres" placeholder="https://свой-worker.workers.dev/v1"></div>
       <div class="pole"><label>Шаблон вёрстки</label><input type="file" id="nShablon" accept="image/*"></div>
     </div>
-    <div class="podskazka">У Google для картиночных моделей нужен биллинг — на бесплатном ключе
-      они отвечают 429. Те же модели несёт OpenRouter и платит своими кредитами: биллинг Google
-      не нужен. Совсем бесплатно — свой Cloudflare Worker, см. <b>ClipGen\BESPLATNO.md</b>.</div>
+    <div class="podskazka">Проверено вживую: у Google <b>все</b> картиночные модели имеют
+      Free Tier «недоступен» — на бесплатном ключе они отвечают 429 всегда, хотя разбор при этом
+      бесплатен. Поэтому по умолчанию рисует <b>OpenRouter</b>: те же модели Google, платит своими
+      кредитами. Совсем бесплатно — свой Cloudflare Worker (<b>VORKER_poshagovo.md</b>) или шлюз
+      на своём сервере (<b>NVIDIA_na_servere.md</b>); адрес вписывается ниже.
+      NVIDIA рисовать не годится: её картиночный сервис на бесплатных кредитах не отвечает вовсе,
+      а вот на разбор она хороша — но только через свой прокси, напрямую браузер к ней не пустят.
+      И самый простой путь: нарисовать лист руками на странице нейронки и бросить его в
+      «Лист с видами» слева — приложение само разрежет.</div>
+    <div class="podskazka"><b>Если стоит свой Cloudflare Worker.</b> Разбор: поставщик «Свой API»,
+      адрес вида <code>https://имя.логин.workers.dev/v1</code>, ключ любой непустой, модель
+      <code>@cf/meta/llama-4-scout-17b-16e-instruct</code>. Виды: «Свой адрес», тот же адрес,
+      модель <code>@cf/black-forest-labs/flux-1-schnell</code>.
+      Модель <code>llama-3.2-11b-vision</code> брать не надо: Workers AI требует один раз
+      отправить согласие с лицензией Meta, где заявляешь, что не живёшь в ЕС. Scout работает сразу
+      и лицензии не просит. В списке моделей зрячие идут первыми — scout и maverick видят
+      картинки, хотя слова vision в имени нет.</div>
     <div class="mini" id="miniShablon"></div>
     <div class="podskazka">Шаблон — чистый лист без единой буквы. Эталон с таблицей класть нельзя:
       модель начинает копировать с него текст, а иногда и саму деталь.</div>
@@ -284,6 +315,6 @@
   <footer><button class="knopka" id="knZakrytSpravochnik">Закрыть</button></footer>
 </dialog>
 
-<script type="module" src="js/main.js?v=16"></script>
+<script type="module" src="js/main.js?v=18"></script>
 </body>
 </html>
