@@ -10,21 +10,21 @@
 {"imports":{
   "three":"./vendor/three/three.module.js",
   "three/addons/":"./vendor/three/addons/",
-  "./js/algoritmy.js":"./js/algoritmy.js?v=26",
-  "./js/kruglost.js":"./js/kruglost.js?v=26",
-  "./js/objyom.js":"./js/objyom.js?v=26",
-  "./js/narezka.js":"./js/narezka.js?v=26",
-  "./js/elementy.js":"./js/elementy.js?v=26",
-  "./js/geom.js":"./js/geom.js?v=26",
-  "./js/konsensus.js":"./js/konsensus.js?v=26",
-  "./js/nejro.js":"./js/nejro.js?v=26",
-  "./js/obmer.js":"./js/obmer.js?v=26",
-  "./js/sborka.js":"./js/sborka.js?v=26",
-  "./js/shema.js":"./js/shema.js?v=26",
-  "./js/siluet.js":"./js/siluet.js?v=26",
-  "./js/stl.js":"./js/stl.js?v=26",
-  "./js/vidy.js":"./js/vidy.js?v=26",
-  "./js/main.js":"./js/main.js?v=26"
+  "./js/algoritmy.js":"./js/algoritmy.js?v=28",
+  "./js/kruglost.js":"./js/kruglost.js?v=28",
+  "./js/objyom.js":"./js/objyom.js?v=28",
+  "./js/narezka.js":"./js/narezka.js?v=28",
+  "./js/elementy.js":"./js/elementy.js?v=28",
+  "./js/geom.js":"./js/geom.js?v=28",
+  "./js/konsensus.js":"./js/konsensus.js?v=28",
+  "./js/nejro.js":"./js/nejro.js?v=28",
+  "./js/obmer.js":"./js/obmer.js?v=28",
+  "./js/sborka.js":"./js/sborka.js?v=28",
+  "./js/shema.js":"./js/shema.js?v=28",
+  "./js/siluet.js":"./js/siluet.js?v=28",
+  "./js/stl.js":"./js/stl.js?v=28",
+  "./js/vidy.js":"./js/vidy.js?v=28",
+  "./js/main.js":"./js/main.js?v=28"
 }}
 </script>
 </head>
@@ -34,7 +34,7 @@
   <div class="znak">K</div>
   <div class="rastyanut">
     <h1>Разбор клипсы — 3D по фотографии</h1>
-    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v27</span></div>
+    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v28</span></div>
   </div>
   <div class="prav">
     <div class="plotnost" title="Плотность вёрстки">
@@ -134,6 +134,8 @@
           <div id="ktoSprashivat"></div></div>
         <label class="stroka"><input type="checkbox" id="chAlgoritm" checked>
           учитывать голос алгоритма</label>
+        <label class="stroka"><input type="checkbox" id="chPodgon" checked>
+          довести размеры по силуэту в конце (медленнее, но точнее)</label>
         <label class="stroka"><input type="checkbox" id="chVidy">
           дорисовать недостающие виды нейронкой (нужен биллинг)</label>
         <div class="pole" id="poleVidy" hidden style="margin-top:6px">
@@ -323,6 +325,6 @@
   <footer><button class="knopka" id="knZakrytSpravochnik">Закрыть</button></footer>
 </dialog>
 
-<script type="module" src="js/main.js?v=26"></script>
+<script type="module" src="js/main.js?v=28"></script>
 </body>
 </html>
