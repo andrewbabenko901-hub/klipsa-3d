@@ -98,6 +98,21 @@ async function poslat(url, zagolovki, telo, imya) {
  */
 function razobratJson(tekst, imya) {
   if (!tekst) throw new Error(imya + ': пустой ответ');
+
+  // Не всякий сервис отдаёт строку. Workers AI на зрячих моделях иногда кладёт
+  // в content уже разобранный объект, а некоторые — массив кусков вида
+  // [{type:'text',text:'...'}]. Раньше это превращалось в «[object Object]» и
+  // выглядело как «ответ не похож на JSON», хотя ответ был правильный.
+  if (typeof tekst === 'object') {
+    if (Array.isArray(tekst)) {
+      const sobrano = tekst.map(k => (typeof k === 'string' ? k : (k && (k.text || k.content)) || ''))
+                           .filter(Boolean).join('\n').trim();
+      if (sobrano) return razobratJson(sobrano, imya);
+      throw new Error(imya + ': ответ пришёл списком, но текста в нём нет');
+    }
+    return tekst;                       // уже готовый объект — он и есть ответ
+  }
+
   const t = String(tekst).trim();
 
   const poprobovat = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
