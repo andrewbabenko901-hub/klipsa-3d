@@ -35,6 +35,20 @@ try {
   }
 } catch {}
 
+// v34: прямой адрес NVIDIA из браузера недостижим — у неё нет заголовков CORS.
+// У кого он остался прописан, разово переводим на путь /nvidia/v1 нашего же
+// воркера: это тот самый шлюз, адрес которого выводится из «своего» API.
+try {
+  if (!localStorage.getItem('klipsa.migr34')) {
+    const a = JSON.parse(localStorage.getItem('klipsa.adresa') || '{}');
+    if (/nvidia\.com/i.test(a.nvidia || '')) {
+      const shlyuz = N.podskazatAdresNvidia(a.svoj || '');
+      if (shlyuz) { a.nvidia = shlyuz; localStorage.setItem('klipsa.adresa', JSON.stringify(a)); }
+    }
+    localStorage.setItem('klipsa.migr34', '1');
+  }
+} catch {}
+
 const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
@@ -1061,7 +1075,13 @@ function pokazatRisovalku() {
   if (spisok.length && !spisok.includes(LS.modelKartinki)) {
     LS.modelKartinki = spisok[0]; sel.value = spisok[0];
   }
-  $('#poleRisAdres').hidden = r.post !== 'svoj';
+  $('#poleRisAdres').hidden = (r.post !== 'svoj' && r.post !== 'nvidia');
+  // У NVIDIA картинки идут через тот же шлюз, что и разбор: подставляем его
+  // адрес сами, чтобы не заставлять вводить одно и то же дважды.
+  if (r.post === 'nvidia' && !r.adres) {
+    const a = N.podskazatAdresNvidia(LS.adresa.svoj || '') || LS.adresa.nvidia || '';
+    if (a) { r.adres = a; LS.risovalka = r; }
+  }
   $('#nRisAdres').value = r.adres || '';
 }
 

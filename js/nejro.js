@@ -453,9 +453,11 @@ export const POSTAVSHCHIKI = {
     },
   },
 
-  // NVIDIA NIM — каталог build.nvidia.com. Адрес OpenAI-совместимый, запросы
-  // из браузера пропускает (CORS открыт), картинка идёт обычным image_url.
-  // Список моделей отдаётся даже без ключа, поэтому его видно сразу.
+  // NVIDIA NIM — каталог build.nvidia.com. Адрес OpenAI-совместимый, картинка
+  // идёт обычным image_url. НО: напрямую из браузера NVIDIA не отвечает — она
+  // не отдаёт заголовки CORS (проверено дважды, и на /models, и на
+  // /chat/completions). Поэтому сюда вписывается не её адрес, а адрес нашего
+  // воркера: он ходит к NVIDIA со стороны сервера, где правила CORS нет.
   nvidia: {
     imya: 'NVIDIA NIM — каталог build.nvidia.com',
     gdeKlyuch: 'https://build.nvidia.com/settings/api-keys',
@@ -463,27 +465,39 @@ export const POSTAVSHCHIKI = {
     adresPoUmolchaniyu: 'https://integrate.api.nvidia.com/v1',
     podskazka: 'Ключ — кнопкой <b>Generate API Key</b> на build.nvidia.com/settings/api-keys. ' +
       'Ключ обязан начинаться с <b>nvapi-</b>: персональный ключ NGC вида «uuid:hex» даёт 401. ' +
-      '<b>Напрямую из браузера NVIDIA не работает</b> — у неё нет заголовков CORS, проверено ' +
-      'дважды. Нужен свой прокси. Если стоит наш Cloudflare Worker версии 2, впиши сюда ' +
-      '<b>https://имя.логин.workers.dev/nvidia/v1</b> — он пробрасывает запрос на ' +
-      'integrate.api.nvidia.com и ключ у себя не хранит. Код воркера — в ' +
-      '<b>ClipGen\\VORKER_index_v2.js</b>.',
+      '<b>Адрес — не NVIDIA, а наш воркер:</b> ' +
+      '<b>https://klipsa.&lt;логин&gt;.workers.dev/nvidia/v1</b>. Напрямую браузер к NVIDIA не ' +
+      'пускают (нет заголовков CORS), а воркер ходит со стороны сервера и ключ у себя не хранит. ' +
+      'Новый index.js уже лежит в <b>ClipGen\\klipsa-worker</b> — осталась одна команда ' +
+      'в этой папке: <b>npx wrangler deploy</b>.',
     modeli: ['meta/llama-3.2-90b-vision-instruct','meta/llama-3.2-11b-vision-instruct',
              'google/gemma-3-12b-it','microsoft/phi-3-vision-128k-instruct','nvidia/neva-22b'],
     ceny: {},
     async spisokModeley(klyuch, adres) {
       const baza = bazaSvoego(adres || 'https://integrate.api.nvidia.com/v1');
+      if (pryamoNaNvidia(baza))
+        throw new Error('прямой адрес из браузера недостижим (нет CORS) — нужен шлюз');
       const r = await fetch(baza + '/models',
                             { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
       const j = await r.json();
-      if (!r.ok) throw new Error(j?.detail || j?.title || ('HTTP ' + r.status));
+      if (!r.ok) {
+        const t = j?.error || j?.detail || j?.title || ('HTTP ' + r.status);
+        if (r.status === 404 && STARYJ_VORKER.test(String(t)))
+          throw new Error('шлюз отвечает, но пути /nvidia/v1 у него нет — на воркере ' +
+            'лежит первая версия. Выложи вторую: в папке ClipGen\\klipsa-worker ' +
+            'уже лежит нужный index.js, осталась одна команда — npx wrangler deploy.');
+        throw new Error(typeof t === 'string' ? t : JSON.stringify(t));
+      }
       const vse = (j.data||[]).map(m => m.id);
       // модальность в списке не указана — отбираем по имени, зрячие вперёд
       const spisok = zryachieVpered(vse);
       return spisok;
     },
     async razobrat(klyuch, model, foto, promt, adres) {
-      const url = bazaSvoego(adres || 'https://integrate.api.nvidia.com/v1') + '/chat/completions';
+      if (pryamoNaNvidia(adres || 'https://integrate.api.nvidia.com/v1'))
+        throw new Error('NVIDIA: прямой адрес из браузера недостижим (нет CORS). ' +
+          'Впиши адрес шлюза https://klipsa.<логин>.workers.dev/nvidia/v1 рядом с ключом.');
+      const url = bazaSvoego(adres) + '/chat/completions';
       const soderzhanie = [];
       for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: await szhatFoto(f) } });
       soderzhanie.push({ type:'text', text: promt });
@@ -571,6 +585,27 @@ export function bazaSvoego(adres) {
   return u;
 }
 
+// Адрес шлюза для NVIDIA угадываем по адресу «своего» API. Свой API у нас —
+// Cloudflare Worker; начиная с версии 2 у того же воркера есть путь
+// /nvidia/v1 (проброс на integrate.api.nvidia.com) и /nvidia-genai (проброс
+// на картиночный ai.api.nvidia.com). Значит, отдельный адрес вводить не надо:
+// он выводится из уже работающего.
+export function podskazatAdresNvidia(adresSvoego) {
+  try {
+    const u = new URL(bazaSvoego(adresSvoego));
+    if (!/workers\.dev$/i.test(u.hostname) && !/\/v1$/.test(u.pathname)) return '';
+    return u.origin + '/nvidia/v1';
+  } catch (e) { return ''; }
+}
+
+// Прямой адрес NVIDIA из браузера недостижим — проверено дважды. Отличаем его,
+// чтобы не тратить 150 секунд на заведомо мёртвый запрос.
+export const pryamoNaNvidia = (adres) =>
+  /(^|\.)(integrate|ai)\.api\.nvidia\.com/i.test(String(adres || ''));
+
+// Ответ старого воркера (версии 1) на путь /nvidia/... — «нет такого пути».
+const STARYJ_VORKER = /нет такого пути/i;
+
 // ---------- общее ----------
 
 export async function razobrat(post, klyuch, model, foto, dopolnenie, adres) {
@@ -598,6 +633,12 @@ export async function proverit(post, klyuch, model, adres) {
   const adr = String(adres || p.adresPoUmolchaniyu || '').trim();
   if (p.svoyAdres && !adr)
     return { ok:false, tekst:'Не задан адрес API — впиши его рядом с ключом.' };
+  // Прямой адрес NVIDIA заведомо не работает из браузера: у неё нет CORS.
+  // Не ходим туда вовсе, а сразу говорим, что вписать.
+  if (post === 'nvidia' && pryamoNaNvidia(adr))
+    return { ok:false, tekst:'NVIDIA: прямой адрес ' + adr + ' из браузера недостижим — ' +
+      'у NVIDIA нет заголовков CORS (проверено дважды). Впиши сюда адрес нашего шлюза: ' +
+      'https://klipsa.<логин>.workers.dev/nvidia/v1' };
   // Кириллица в ключе или в имени модели роняет fetch на уровне заголовков,
   // причём сообщением, из которого ничего не понять. Проверяем до запроса.
   try { proverZagolovki({ Authorization: 'Bearer ' + klyuch, 'X-Model': model || '' }, p.imya); }
@@ -653,6 +694,12 @@ export const RISOVALKI = {
   gemini:     { imya: 'Google напрямую — картинкам нужен биллинг на ключе',
                 modeli: ['gemini-3.1-flash-image','gemini-3.1-flash-lite-image',
                          'gemini-3-pro-image','gemini-2.5-flash-image'] },
+  nvidia:     { imya: 'NVIDIA через свой шлюз — flux и stable diffusion',
+                modeli: ['black-forest-labs/flux.1-schnell',
+                         'black-forest-labs/flux.1-dev',
+                         'stabilityai/stable-diffusion-3-medium',
+                         'stabilityai/sdxl-turbo',
+                         'briaai/bria-2.3'] },
   svoj:       { imya: 'Свой адрес — Cloudflare Worker или шлюз на своём сервере',
                 modeli: ['@cf/black-forest-labs/flux-1-schnell',
                          '@cf/black-forest-labs/flux-2-klein-4b',
@@ -676,9 +723,35 @@ export const RISOVALKI = {
 export const risovalkaVidit = (model) =>
   !/flux|stable-diffusion|sdxl|dreamshaper|lightning|sana|shuttle/i.test(String(model || ''));
 
+// Картинки у NVIDIA живут на другом хосте — ai.api.nvidia.com, путь
+// /v1/genai/<вендор>/<модель>, тело {prompt, mode, steps, seed, cfg_scale},
+// ответ — artifacts[0].base64. У нашего воркера это путь /nvidia-genai/...
+// Адрес выводим из адреса чатового шлюза: .../nvidia/v1 → .../nvidia-genai/v1
+export function bazaGenaiNvidia(adres) {
+  const u = bazaSvoego(adres || '');
+  if (/\/nvidia\/v1$/i.test(u)) return u.replace(/\/nvidia\/v1$/i, '/nvidia-genai/v1');
+  if (/\/nvidia-genai\/v1$/i.test(u)) return u;
+  if (pryamoNaNvidia(u)) throw new Error('прямой адрес NVIDIA из браузера недостижим — нужен шлюз');
+  return u.replace(/\/v1$/i, '') + '/nvidia-genai/v1';
+}
+
 /** Нарисовать картинку через выбранного поставщика. */
 export async function narisovatCherez(post, klyuch, model, foto, promt, adres, promtKratkij) {
   if (post === 'gemini') return narisovatVid(klyuch, model, foto, promt);
+  if (post === 'nvidia') {
+    // Это чистые диффузионки: фотографию они не видят, поэтому им уходит
+    // короткий английский промпт — длинный русский их фильтр отбивает.
+    const url = bazaGenaiNvidia(adres) + '/genai/' + model;
+    const j = await poslat(url,
+      { 'Content-Type':'application/json', Accept:'application/json',
+        Authorization:'Bearer ' + klyuch },
+      { prompt: (promtKratkij || promt).slice(0, 900), mode:'base',
+        cfg_scale: 3.5, steps: /schnell|turbo/i.test(model) ? 4 : 25, seed: 0 },
+      'NVIDIA-картинки');
+    const b64 = j?.artifacts?.[0]?.base64 || j?.image || j?.data?.[0]?.b64_json;
+    if (!b64) throw new Error('NVIDIA не вернула картинку (ответ без artifacts)');
+    return { kartinka: 'data:image/png;base64,' + b64, mime:'image/png', b64 };
+  }
   if (post === 'openrouter' || post === 'svoj') {
     const baza = post === 'svoj' ? bazaSvoego(adres) : 'https://openrouter.ai/api/v1';
     // Чистые рисовалки (flux, stable diffusion) картинку не видят и длинный
