@@ -556,7 +556,7 @@ async function sintez() {
         try {
           if (!model) throw new Error('не задано имя модели — впиши его в «Нейронки и ключи»');
           const r = await N.razobrat(post, klyuchi[post].trim(), model, S.foto, dop,
-                                     (LS.adresa[post]||'').trim());
+                                     (LS.adresa[post] || N.POSTAVSHCHIKI[post].adresPoUmolchaniyu || '').trim());
           r.ves = 1; S.rashod.push({ istochnik:r.istochnik, post, model, rashod:r.rashod });
           return r;
         } catch (e) {
@@ -665,14 +665,16 @@ function pokazatPostavshchikov() {
         <div class="pole"><label>Ключ</label>
           <input type="password" data-klyuch value="${(klyuchi[id]||'').replace(/"/g,'&quot;')}" placeholder="вставь ключ" autocomplete="off"></div>
         <div class="pole"><label>Модель</label>
-          ${p.svoyAdres
+          ${p.svoyAdres && !p.modeli.length
             ? `<input type="text" data-modelsvoj value="${(modeli[id]||'').replace(/"/g,'&quot;')}" placeholder="имя модели">`
             : `<select data-model>${p.modeli.map(m=>`<option${m===(modeli[id]||p.modeli[0])?' selected':''}>${m}</option>`).join('')}</select>`}</div>
       </div>
       ${p.svoyAdres ? `<div class="pole" style="margin-top:7px"><label>Адрес API</label>
-        <input type="text" data-adres value="${(LS.adresa[id]||'').replace(/"/g,'&quot;')}"
-               placeholder="https://api.pexels.com/v1  или  https://свой-сервер/v1"></div>` : ''}
-      <div class="podskazka">${p.svoyAdres
+        <input type="text" data-adres value="${(LS.adresa[id]||p.adresPoUmolchaniyu||'').replace(/"/g,'&quot;')}"
+               placeholder="${p.adresPoUmolchaniyu || 'https://свой-сервер/v1'}"></div>` : ''}
+      <div class="podskazka">${p.podskazka
+        ? p.podskazka + (p.gdeKlyuch ? ` <a href="${p.gdeKlyuch}" target="_blank" rel="noopener">открыть</a>` : '')
+        : p.svoyAdres
         ? 'Любой сервис с методом <b>/chat/completions</b> как у OpenAI. Адрес — до /chat/completions, например <b>https://хост/v1</b>. Ключ хранится только в этом браузере.'
         : `Ключ: <a href="${p.gdeKlyuch}" target="_blank" rel="noopener">${p.gdeKlyuch.replace('https://','')}</a>`}</div>
       <div data-otvet></div>`;
@@ -686,6 +688,9 @@ function pokazatPostavshchikov() {
     polModeli.oninput = polModeli.onchange = e => {
       const m = LS.modeli; m[id] = e.target.value; LS.modeli = m; obnovitKtoSprashivat(); };
     const polAdres = d.querySelector('[data-adres]');
+    if (polAdres && !LS.adresa[id] && p.adresPoUmolchaniyu) {
+      const a = LS.adresa; a[id] = p.adresPoUmolchaniyu; LS.adresa = a;
+    }
     if (polAdres) polAdres.oninput = e => {
       const a = LS.adresa; a[id] = e.target.value.trim(); LS.adresa = a;
       d.querySelector('[data-otvet]').innerHTML = ''; };
@@ -694,7 +699,8 @@ function pokazatPostavshchikov() {
       const b = ev.target, o = d.querySelector('[data-otvet]');
       b.disabled = true; o.innerHTML = '<div class="podskazka">Спрашиваю…</div>';
       const r = await N.proverit(id, (LS.klyuchi[id]||'').trim(),
-                                 LS.modeli[id] || p.modeli[0], (LS.adresa[id]||'').trim());
+                                 LS.modeli[id] || p.modeli[0],
+                                 (LS.adresa[id] || p.adresPoUmolchaniyu || '').trim());
       o.innerHTML = r.ok ? `<div class="itog" style="margin-top:7px"><div class="krug">✓</div><div>${r.tekst}</div></div>`
                          : `<div class="oshibka" style="margin-top:7px">${r.tekst}</div>`;
       const sel = d.querySelector('[data-model]');

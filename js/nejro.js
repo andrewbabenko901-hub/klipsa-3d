@@ -213,11 +213,19 @@ export const POSTAVSHCHIKI = {
   nvidia: {
     imya: 'NVIDIA NIM — каталог build.nvidia.com',
     gdeKlyuch: 'https://build.nvidia.com/settings/api-keys',
+    svoyAdres: true,
+    adresPoUmolchaniyu: 'https://integrate.api.nvidia.com/v1',
+    podskazka: 'Ключ — кнопкой <b>Generate API Key</b> на build.nvidia.com/settings/api-keys ' +
+      '(значение показывают один раз). <b>Внимание:</b> NVIDIA не пускает запросы из браузера ' +
+      'с чужого сайта — заголовков CORS у неё нет. Прямой адрес сработает только через свой ' +
+      'прокси: поставь его сюда вместо адреса по умолчанию. Готовый конфиг лежит в ' +
+      '<b>ClipGen\\NVIDIA_proksi.md</b>.',
     modeli: ['meta/llama-3.2-90b-vision-instruct','meta/llama-3.2-11b-vision-instruct',
              'google/gemma-3-12b-it','microsoft/phi-3-vision-128k-instruct','nvidia/neva-22b'],
     ceny: {},
-    async spisokModeley(klyuch) {
-      const r = await fetch('https://integrate.api.nvidia.com/v1/models',
+    async spisokModeley(klyuch, adres) {
+      const baza = bazaSvoego(adres || 'https://integrate.api.nvidia.com/v1');
+      const r = await fetch(baza + '/models',
                             { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.detail || j?.title || ('HTTP ' + r.status));
@@ -229,7 +237,8 @@ export const POSTAVSHCHIKI = {
       spisok.zryachih = zryachie.length;
       return spisok;
     },
-    async razobrat(klyuch, model, foto, promt) {
+    async razobrat(klyuch, model, foto, promt, adres) {
+      const url = bazaSvoego(adres || 'https://integrate.api.nvidia.com/v1') + '/chat/completions';
       const soderzhanie = [];
       for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: await szhatFoto(f) } });
       soderzhanie.push({ type:'text', text: promt });
@@ -239,12 +248,15 @@ export const POSTAVSHCHIKI = {
                      temperature:0.2, max_tokens:4096 };
       let j;
       try {
-        // сначала со строгим JSON: NIM умеет guided_json, но не все модели
-        j = await poslat('https://integrate.api.nvidia.com/v1/chat/completions', zag,
+        // сначала со строгим JSON: NIM умеет guided_json, но не на всех моделях
+        j = await poslat(url, zag,
               Object.assign({}, telo, { nvext:{ guided_json: strogaya(SHEMA) } }), 'NVIDIA');
       } catch (e) {
+        if (/сеть не пустила/.test(e.message))
+          throw new Error('NVIDIA не пускает запросы из браузера напрямую (нет заголовков CORS). ' +
+                          'Нужен свой прокси — впиши его адрес в поле рядом с ключом.');
         if (!/nvext|guided|400|422/i.test(e.message)) throw e;
-        j = await poslat('https://integrate.api.nvidia.com/v1/chat/completions', zag, telo, 'NVIDIA');
+        j = await poslat(url, zag, telo, 'NVIDIA');
       }
       const u = j.usage || {};
       return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'NVIDIA'),
@@ -320,10 +332,11 @@ export async function proverit(post, klyuch, model, adres) {
   const p = POSTAVSHCHIKI[post];
   if (!p) return { ok:false, tekst:'неизвестный поставщик' };
   if (!klyuch) return { ok:false, tekst:p.imya + ': ключ не введён.' };
-  if (p.svoyAdres && !String(adres||'').trim())
-    return { ok:false, tekst:'Не задан адрес своего API — впиши его рядом с ключом.' };
+  const adr = String(adres || p.adresPoUmolchaniyu || '').trim();
+  if (p.svoyAdres && !adr)
+    return { ok:false, tekst:'Не задан адрес API — впиши его рядом с ключом.' };
   try {
-    const spisok = await p.spisokModeley(klyuch, adres);
+    const spisok = await p.spisokModeley(klyuch, adr);
     const est = !model || spisok.includes(model);
     return { ok: est, modeli: spisok, kartinki: spisok.kartinki || [],
       tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей' +
@@ -333,7 +346,10 @@ export async function proverit(post, klyuch, model, adres) {
   } catch (e) {
     let m = e.message || String(e);
     if (/Failed to fetch|NetworkError/i.test(m))
-      m += ' — похоже на блокировку сети, VPN или расширение браузера.';
+      m += post === 'nvidia'
+        ? ' — NVIDIA не отдаёт заголовки CORS, из браузера напрямую к ней не достучаться. ' +
+          'Поставь свой прокси и впиши его адрес рядом с ключом.'
+        : ' — похоже на блокировку сети, VPN или расширение браузера.';
     return { ok:false, tekst: p.imya + ': ' + m };
   }
 }
