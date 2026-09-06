@@ -75,6 +75,11 @@ async function poslat(url, zagolovki, telo, imya) {
   let j = null; try { j = JSON.parse(t); } catch {}
   if (!r.ok) {
     const m = j?.error?.message || j?.message || t.slice(0, 240);
+    if (r.status === 402 || /more credits|insufficient|can only afford/i.test(m))
+      throw new Error(imya + ': не хватает кредитов на счёте. ' +
+        'Пополни счёт у поставщика — либо переключи «Через кого рисовать» на ' +
+        '«Свой адрес» и рисуй бесплатно через свой Cloudflare Worker ' +
+        '(модель @cf/black-forest-labs/flux-1-schnell). Ответ поставщика: ' + m);
     throw new Error(imya + ' ответил ' + r.status + ': ' + m);
   }
   if (!j) throw new Error(imya + ': ответ не разобрался');
@@ -510,7 +515,11 @@ export async function narisovatCherez(post, klyuch, model, foto, promt, adres) {
     const j = await poslat(baza + '/chat/completions',
       { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch,
         'HTTP-Referer':location.origin, 'X-Title':'klipsa-3d' },
-      { model, modalities:['image','text'], messages:[{ role:'user', content: soderzhanie }] },
+      // Потолок ответа обязателен. Без него OpenRouter резервирует под ответ
+      // весь контекст модели — десятки тысяч токенов — и отбивает запрос по
+      // деньгам (402), хотя картинка стоит около 1200 токенов. Даём запас.
+      { model, modalities:['image','text'], max_tokens: 8192,
+        messages:[{ role:'user', content: soderzhanie }] },
       post === 'svoj' ? 'Свой адрес' : 'OpenRouter');
     const m = j?.choices?.[0]?.message || {};
     const k = (m.images || [])[0];
