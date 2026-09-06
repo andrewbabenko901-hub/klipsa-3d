@@ -512,9 +512,16 @@ export async function narisovatCherez(post, klyuch, model, foto, promt, adres) {
     const soderzhanie = [{ type:'text', text: promt }];
     for (const f of (Array.isArray(foto) ? foto : [foto]))
       soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
-    const j = await poslat(baza + '/chat/completions',
-      { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch,
-        'HTTP-Referer':location.origin, 'X-Title':'klipsa-3d' },
+    // HTTP-Referer и X-Title — фирменные заголовки OpenRouter (для статистики).
+    // Своему адресу их слать нельзя: чужой сервер не перечислит их в
+    // Access-Control-Allow-Headers, предполётный запрос не пройдёт, и fetch
+    // упадёт с «Failed to fetch» — на вид как обрыв сети, хотя сервер жив.
+    const zagolovki = { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch };
+    if (post === 'openrouter') {
+      zagolovki['HTTP-Referer'] = location.origin;
+      zagolovki['X-Title'] = 'klipsa-3d';
+    }
+    const j = await poslat(baza + '/chat/completions', zagolovki,
       // Потолок ответа обязателен. Без него OpenRouter резервирует под ответ
       // весь контекст модели — десятки тысяч токенов — и отбивает запрос по
       // деньгам (402), хотя картинка стоит около 1200 токенов. Даём запас.
