@@ -46,7 +46,28 @@ async function szhatFoto(f, predel = 130000) {
   return c.toDataURL('image/jpeg', 0.5);
 }
 
+/**
+ * Заголовки HTTP умеют только латиницу-1. Если в ключ или в имя модели
+ * затесалась кириллица — а это бывает сплошь и рядом, стоит набрать «х» в
+ * русской раскладке вместо латинского «x», — fetch падает с невразумительным
+ * «String contains non ISO-8859-1 code point». Ловим заранее и говорим
+ * по-человечески, что именно чинить.
+ */
+export function proverZagolovki(zagolovki, imya) {
+  for (const [klyuch, znachenie] of Object.entries(zagolovki || {})) {
+    const plohie = [...String(znachenie)].filter(c => c.charCodeAt(0) > 255);
+    if (!plohie.length) continue;
+    const gde = /^authorization$/i.test(klyuch) ? 'в ключе'
+              : /^x-model$/i.test(klyuch)        ? 'в имени модели'
+              : 'в заголовке ' + klyuch;
+    throw new Error(imya + ': ' + gde + ' есть нелатинские символы (' +
+      [...new Set(plohie)].join(' ') + '). Скорее всего набрано в русской раскладке — ' +
+      'например «х» вместо латинской «x». Заголовки такое не переносят: перенаберите латиницей.');
+  }
+}
+
 async function poslat(url, zagolovki, telo, imya) {
+  proverZagolovki(zagolovki, imya);
   let r;
   try { r = await fetch(url, { method:'POST', headers:zagolovki, body:JSON.stringify(telo) }); }
   catch (e) { throw new Error(imya + ': сеть не пустила запрос (' + e.message + ')'); }
@@ -412,6 +433,10 @@ export async function proverit(post, klyuch, model, adres) {
   const adr = String(adres || p.adresPoUmolchaniyu || '').trim();
   if (p.svoyAdres && !adr)
     return { ok:false, tekst:'Не задан адрес API — впиши его рядом с ключом.' };
+  // Кириллица в ключе или в имени модели роняет fetch на уровне заголовков,
+  // причём сообщением, из которого ничего не понять. Проверяем до запроса.
+  try { proverZagolovki({ Authorization: 'Bearer ' + klyuch, 'X-Model': model || '' }, p.imya); }
+  catch (e) { return { ok:false, tekst: e.message }; }
   try {
     const spisok = await p.spisokModeley(klyuch, adr);
     const est = !model || spisok.includes(model);
