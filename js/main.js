@@ -38,14 +38,14 @@ try {
 // v34: прямой адрес NVIDIA из браузера недостижим — у неё нет заголовков CORS.
 // У кого он остался прописан, разово переводим на путь /nvidia/v1 нашего же
 // воркера: это тот самый шлюз, адрес которого выводится из «своего» API.
+// Флага «уже сделано» здесь нарочно нет: если адрес своего API ещё не введён,
+// вывести из него адрес шлюза не из чего, и попытку надо повторить в следующий
+// раз. Правка идемпотентная — второй раз ей просто нечего менять.
 try {
-  if (!localStorage.getItem('klipsa.migr34')) {
-    const a = JSON.parse(localStorage.getItem('klipsa.adresa') || '{}');
-    if (/nvidia\.com/i.test(a.nvidia || '')) {
-      const shlyuz = N.podskazatAdresNvidia(a.svoj || '');
-      if (shlyuz) { a.nvidia = shlyuz; localStorage.setItem('klipsa.adresa', JSON.stringify(a)); }
-    }
-    localStorage.setItem('klipsa.migr34', '1');
+  const a = JSON.parse(localStorage.getItem('klipsa.adresa') || '{}');
+  if (/nvidia\.com/i.test(a.nvidia || '')) {
+    const shlyuz = N.podskazatAdresNvidia(a.svoj || '');
+    if (shlyuz) { a.nvidia = shlyuz; localStorage.setItem('klipsa.adresa', JSON.stringify(a)); }
   }
 } catch {}
 
