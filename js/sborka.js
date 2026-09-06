@@ -50,6 +50,9 @@ export function sobrat(tela, izmer, razmerMm) {
     const L = Math.max(0.02, (b - a) / polosy.length) * vysMm;
     const k = elementDlya(t.tip, t.sechenie);
     const reb = Math.max(0, t.rebra | 0), zub = Math.max(0, t.zubcov | 0);
+    // зазор между лапками не выдумываем: он померен по просветам в полосах
+    const nog = Math.max(2, reb || (t.kuskov | 0) || 2);
+    const zaz = t.zazor > 0.02 ? (D * t.zazor) / nog : 0;
     let p;
 
     switch (k) {
@@ -68,8 +71,8 @@ export function sobrat(tela, izmer, razmerMm) {
       case 'stem_plain':
         p = { d: ok(D,'d'), len: ok(L,'len') }; break;
       case 'stem_split':
-        p = { d: ok(D,'d'), len: ok(L,'len'), legs: Math.max(2, reb||2),
-              span: ok(D*0.6,'span'), wing: ok(D*0.25,'wing') }; break;
+        p = { d: ok(D,'d'), len: ok(L,'len'), legs: nog,
+              span: ok(zaz || D*0.6,'span'), wing: ok(D*0.25,'wing') }; break;
       case 'cone_ring': {
         let dv = Math.min(Dv, Dn), dn = Math.max(Dv, Dn);
         if (Dv > Dn) { const x = dv; dv = dn; dn = x; }
@@ -98,13 +101,13 @@ export function sobrat(tela, izmer, razmerMm) {
         break;
       case 'cone_split':
         p = { d: ok(Dv,'d'), dLow: ok(Math.max(1.5, Dn*0.3),'dLow'), len: ok(L,'len'),
-              bore: ok(D*0.35,'bore'), legs: Math.max(2, reb||2),
-              gap: ok(D*0.12,'gap'), nasechki: 0 }; break;
+              bore: ok(D*0.35,'bore'), legs: nog,
+              gap: ok(zaz || D*0.12,'gap'), nasechki: 0 }; break;
       case 'tip_cone':
         p = { d: ok(D,'d'), len: ok(L,'len') }; break;
       case 'blade_legs':
-        p = { w: ok(D,'w'), t: ok(D*0.2,'t'), len: ok(L,'len'), legs: Math.max(2, reb||2),
-              wing: ok(D*0.2,'wing'), core: ok(D*0.35,'core') }; break;
+        p = { w: ok(D,'w'), t: ok(D*0.2,'t'), len: ok(L,'len'), legs: nog,
+              wing: ok(D*0.2,'wing'), core: ok(Math.max(1.2, D - (zaz||D*0.65)),'core') }; break;
       case 'wings_up':
         p = { w: ok(D*0.4,'w'), t: ok(D*0.15,'t'), h: ok(L,'h'),
               spread: ok(D,'spread'), legs: Math.max(2, reb||2) }; break;
@@ -113,9 +116,11 @@ export function sobrat(tela, izmer, razmerMm) {
               gap: ok(D*0.12,'gap'), okno: ok(L*0.4,'okno'), wing: ok(D*0.15,'wing') }; break;
       case 'legs_u':
         p = { w: ok(D*0.35,'w'), t: ok(D*0.15,'t'), len: ok(L,'len'), span: ok(D,'span') }; break;
-      case 'hvostovik':
-        p = { d: ok(D*0.4,'d'), w: ok(D*0.4,'w'), t: ok(D*0.18,'t'), len: ok(L,'len'),
-              spread: ok(D,'spread'), foot: ok(D*0.25,'foot'), legs: Math.max(2, reb||2) }; break;
+      case 'hvostovik': {
+        const uzko = Math.min(Dv, Dn), shiroko = Math.max(Dv, Dn, D);
+        p = { d: ok(uzko*0.9,'d'), w: ok(uzko*0.55,'w'), t: ok(uzko*0.45,'t'), len: ok(L,'len'),
+              spread: ok(shiroko,'spread'), foot: ok(uzko*0.5,'foot'), legs: nog };
+        break; }
       case 'ring_lug':
         p = { d: ok(D,'d'), dBore: ok(D*0.5,'dBore'), t: ok(L,'t'),
               w: ok(D*0.6,'w'), len: ok(L*2,'len') }; break;
@@ -132,7 +137,7 @@ export function sobrat(tela, izmer, razmerMm) {
 // Подгонка длины низа под опубликованную длину штока.
 // Ширину трогать не надо: sobrat уже поставил самое широкое место равным
 // заданному габариту, второй пересчёт только всё ломал.
-export function podognat(els, katalog) {
+export function podognat(els, katalog, izmer) {
   const zam = [];
   if (katalog.dlinaShtoka > 0) {
     const nizh = els.filter(e => ELEMENTY[e.kind]?.zona !== 'ГОЛОВА');
@@ -147,11 +152,18 @@ export function podognat(els, katalog) {
       } else zam.push('длина штока ' + katalog.dlinaShtoka + ' мм расходится с фото больше чем вдвое — не применял');
     }
   }
-  if (katalog.otverstie > 0) {
+  // отверстие: каталог главнее, но если его нет — берём померенное по снимку
+  let dOtv = 0, otkuda = '';
+  if (katalog.otverstie > 0) { dOtv = katalog.otverstie; otkuda = 'по каталогу'; }
+  else if (izmer && izmer.otverstie && izmer.otverstie.dolyaD > 0.08) {
+    const shir = els.reduce((m, e) => Math.max(m, e.params.d || e.params.w || e.params.l || 0), 0);
+    dOtv = Math.round(shir * izmer.otverstie.dolyaD * 100) / 100;
+    otkuda = 'померено по дырке на снимке';
+  }
+  if (dOtv > 0) {
     const e = els.find(x => 'dBore' in x.params || 'bore' in x.params);
-    if (e) { if ('dBore' in e.params) e.params.dBore = katalog.otverstie;
-             else e.params.bore = katalog.otverstie;
-             zam.push('отверстие поставлено Ø' + katalog.otverstie + ' мм по каталогу'); }
+    if (e) { if ('dBore' in e.params) e.params.dBore = dOtv; else e.params.bore = dOtv;
+             zam.push('отверстие Ø' + dOtv + ' мм — ' + otkuda); }
   }
   return zam;
 }

@@ -30,11 +30,14 @@ export const PO_UMOLCHANIYU = {
   porogGradienta: 42,
 };
 
+// Рабочий размер снимка. На 340 пикселях тонкая шейка занимала два-три
+// столбца и тонула в округлениях; на 620 она измеряется, а не угадывается.
+const RAZMER = 620;
+
 export function obmerit(img, opt = {}) {
   const n = Object.assign({}, PO_UMOLCHANIYU, opt);
-  const S = 340;
   const c = document.createElement('canvas');
-  const k = Math.min(S / img.width, S / img.height, 1);
+  const k = Math.min(RAZMER / img.width, RAZMER / img.height, 1);
   c.width = Math.max(8, Math.round(img.width * k));
   c.height = Math.max(8, Math.round(img.height * k));
   const cx = c.getContext('2d', { willReadFrequently: true });
@@ -52,7 +55,10 @@ export function obmerit(img, opt = {}) {
   }
   if (n.chistka === 'otkrytie' || n.chistka === 'oba') m = A.morfologiya(m, W, H, n.radius, 'otkrytie');
   if (n.chistka === 'zakrytie' || n.chistka === 'oba') m = A.morfologiya(m, W, H, n.radius, 'zakrytie');
-  if (n.dyry) m = A.zapolnitDyry(m, W, H);
+
+  const mSyroj = m;                          // до заполнения дыр — по ней ищем отверстие
+  const mZal = A.zapolnitDyry(m, W, H);
+  if (n.dyry) m = mZal;
 
   const { metka, spisok } = A.komponenty(m, W, H, 100);
   if (!spisok.length) throw new Error('не нашёл деталь на снимке — попробуй другой метод обработки');
@@ -72,11 +78,14 @@ export function obmerit(img, opt = {}) {
     vert = A.asimmetriya(v) >= A.asimmetriya(g);
   }
 
-  let r = A.profil(metka, vyb.nom, W, H, ramka, vert, POLOS);
+  // полный профиль: огибающая, доля материала, просветы
+  const pp = A.profilPolnyj(metka, vyb.nom, W, H, ramka, vert, POLOS);
   const summa = (a,b,c2) => a.slice(b,c2).reduce((x,y)=>x+y,0);
-  const perevernut = summa(r,0,POLOS/2) < summa(r,POLOS/2,POLOS);
-  if (perevernut) r = r.slice().reverse();     // широкий конец наверх
-  const mx = Math.max(...r) || 1;
+  const perevernut = summa(pp.ogib,0,POLOS/2) < summa(pp.ogib,POLOS/2,POLOS);
+  const por = a => perevernut ? a.slice().reverse() : a;
+  const ogib = por(pp.ogib), telo = por(pp.telo), zapoln = por(pp.zapoln),
+        runs = por(pp.runs), centr = por(pp.centr);
+  const mx = Math.max(...ogib) || 1;
 
   // цвет детали — им рисуются модель, чертёж и лист
   let sr=0, sg=0, sb=0, n2=0;
@@ -88,9 +97,12 @@ export function obmerit(img, opt = {}) {
   const shir = vert ? (vyb.x1-vyb.x0+1) : (vyb.y1-vyb.y0+1);
   const vys  = vert ? (vyb.y1-vyb.y0+1) : (vyb.x1-vyb.x0+1);
 
+  // сквозное отверстие: то, что заливка дыр добавила внутри детали
+  const otv = najtiOtverstie(mSyroj, metka, vyb.nom, W, H, ramka, vert, perevernut);
+
   // контур для показа и для оценки изломов
   const kont = A.kontur(metka, vyb.nom, W, H);
-  const uproshchyon = A.rdp(kont, Math.max(1.2, Math.min(W,H)*0.008));
+  const uproshchyon = A.rdp(kont, Math.max(1.2, Math.min(W,H)*0.006));
 
   return {
     cvet,
@@ -98,7 +110,11 @@ export function obmerit(img, opt = {}) {
     shirinaPx: shir, vysotaPx: vys,
     vysotaKShirine: +(vys / Math.max(1, shir)).toFixed(4),
     zapolnennost: +vyb.zapolnennost.toFixed(4),
-    polosy: r.map(x => +(x/mx).toFixed(4)),
+    polosy: ogib.map(x => +(x/mx).toFixed(4)),      // огибающая (как раньше)
+    polosyTelo: telo.map(x => +(x/mx).toFixed(4)),  // сколько на самом деле материала
+    zapoln: zapoln.map(x => +x.toFixed(4)),         // доля материала внутри огибающей
+    runs, centr,
+    otverstie: otv,
     komponent: spisok.length,
     uglovTura: uproshchyon.length,
     metod: n.maska,
@@ -107,9 +123,40 @@ export function obmerit(img, opt = {}) {
   };
 }
 
+// Дырка внутри детали: пиксели, которые появились после заполнения.
+// Нужна, чтобы поставить bore, а не гадать «примерно треть диаметра».
+function najtiOtverstie(mSyroj, metka, nom, W, H, ramka, vert, perevernut) {
+  const dyra = new Uint8Array(W*H);
+  let est = 0;
+  for (let i = 0; i < W*H; i++) if (metka[i] === nom && !mSyroj[i]) { dyra[i] = 1; est++; }
+  if (est < 12) return null;
+  const { spisok } = A.komponenty(dyra, W, H, 12);
+  if (!spisok.length) return null;
+  const b = spisok.reduce((a, c) => c.ploshchad > a.ploshchad ? c : a);
+  const shirD = vert ? (b.x1-b.x0+1) : (b.y1-b.y0+1);
+  const vysD  = vert ? (b.y1-b.y0+1) : (b.x1-b.x0+1);
+  const shirR = vert ? (ramka.x1-ramka.x0+1) : (ramka.y1-ramka.y0+1);
+  const vysR  = vert ? (ramka.y1-ramka.y0+1) : (ramka.x1-ramka.x0+1);
+  let poz = vert ? ((b.y0+b.y1)/2 - ramka.y0)/vysR : ((b.x0+b.x1)/2 - ramka.x0)/vysR;
+  if (perevernut) poz = 1 - poz;
+  return {
+    dolyaD: +(shirD/shirR).toFixed(3),
+    dolyaVysoty: +(vysD/vysR).toFixed(3),
+    poVysote: +poz.toFixed(3),
+    skvoznoe: vysD/vysR > 0.55,
+  };
+}
+
 // Нарезка на тела без нейронки — отдельный, независимый разбор.
 export function razborAlgoritmom(izmer, chuvstvitelnost = 0.5) {
-  return A.narezatTela(izmer.polosy, chuvstvitelnost);
+  return A.narezatTela(izmer.polosy, chuvstvitelnost,
+    izmer.runs ? { zapoln: izmer.zapoln, runs: izmer.runs, telo: izmer.polosyTelo } : null);
+}
+
+// Все варианты нарезки — чтобы выбрать число тел по совпадению силуэта.
+export function variantyRazbora(izmer, maxK = 8) {
+  return A.variantyNarezki(izmer.polosy,
+    izmer.runs ? { zapoln: izmer.zapoln, runs: izmer.runs, telo: izmer.polosyTelo } : null, maxK);
 }
 
 export function granicyTel(polosy, doli) {
@@ -119,61 +166,155 @@ export function granicyTel(polosy, doli) {
   return doli.map((_, i) => [kraya[i], Math.max(kraya[i]+1, kraya[i+1])]);
 }
 
-// Предпросмотр: слева маска с рамкой и контуром, справа профиль полосами.
-export function narisovatRazbor(cv, izmer, granicy) {
-  const p = izmer && izmer._predpokaz;
+/**
+ * Маска детали, развёрнутая «как модель»: ось всегда вертикально, широкий
+ * конец вверху, кадр обрезан по детали. В этой же системе координат живут
+ * runs, поэтому маску, профиль и силуэт модели можно класть друг на друга.
+ */
+export function maskaVyravnennaya(izmer) {
+  const p = izmer && izmer._predpokaz; if (!p) return null;
+  const { W, H, metka, nom, ramka, vert, perevernut } = p;
+  const a0 = vert ? ramka.y0 : ramka.x0, a1 = vert ? ramka.y1 : ramka.x1;
+  const b0 = vert ? ramka.x0 : ramka.y0, b1 = vert ? ramka.x1 : ramka.y1;
+  const L = a1-a0+1, B = b1-b0+1;
+  const d = new Uint8Array(B*L);
+  for (let p2 = 0; p2 < L; p2++) {
+    const y = perevernut ? (L-1-p2) : p2;
+    for (let q = 0; q < B; q++) {
+      const idx = vert ? ((a0+p2)*W + b0+q) : ((b0+q)*W + a0+p2);
+      d[y*B + q] = metka[idx] === nom ? 1 : 0;
+    }
+  }
+  return { d, W: B, H: L };
+}
+
+// ---------- предпросмотр ----------
+
+function panel(cx, x, y, w, h, zag) {
+  cx.fillStyle = '#0a1310'; cx.fillRect(x, y, w, h);
+  cx.strokeStyle = '#1b2c25'; cx.lineWidth = 1; cx.strokeRect(x+.5, y+.5, w-1, h-1);
+  if (zag) { cx.fillStyle = '#6f8a7e'; cx.fillText(zag, x + 6, y + 14); }
+}
+
+/**
+ * Слева — что принято за деталь, в центре — профиль с просветами,
+ * справа (если передан силуэт модели) — наложение модели на снимок.
+ * Все окна в одном масштабе и с сохранёнными пропорциями: раньше профиль
+ * растягивался на всю высоту окна и деталь выглядела не собой.
+ */
+export function narisovatRazbor(cv, izmer, granicy, opt = {}) {
   const cx = cv.getContext('2d'), CW = cv.width, CH = cv.height;
   cx.fillStyle = '#0d1714'; cx.fillRect(0, 0, CW, CH);
-  if (!p) return;
-  const { W, H, metka, nom, ramka, vert, perevernut, kontur } = p;
-  const pol = Math.round(Math.min(CW,CH)*0.05);
-  const podpis = Math.round(CH*0.075);          // место под подпись снизу
-  const zona = CW/2 - pol*1.5;
-  const sc = Math.min(zona/W, (CH-2*pol-podpis)/H);
-  const ox = pol, oy = pol + (CH-2*pol-podpis - H*sc)/2;
+  const p = izmer && izmer._predpokaz; if (!p) return;
+  const mv = maskaVyravnennaya(izmer); if (!mv) return;
+  const nal = opt.nalozhenie || null;
+  const B = mv.W, L = mv.H;
 
-  const im = cx.createImageData(W, H);
-  for (let i = 0; i < W*H; i++) {
-    const est = metka[i] === nom;
-    im.data[i*4]   = est ? 63 : 18;
-    im.data[i*4+1] = est ? 191 : 32;
-    im.data[i*4+2] = est ? 127 : 28;
-    im.data[i*4+3] = 255;
+  const shrift = Math.max(9, Math.round(Math.min(CW, CH) * 0.026));
+  cx.font = shrift + 'px system-ui, sans-serif';
+  const pod = Math.round(shrift * 3.8);          // подписи снизу
+  const verh = Math.round(shrift * 1.9);         // заголовки панелей
+  const pol = Math.round(Math.min(CW, CH) * 0.028);
+  const kolvo = nal ? 3 : 2;
+  const pw = (CW - pol*(kolvo+1)) / kolvo;
+  const ph = CH - pol*2 - pod;
+
+  // общий масштаб: одна и та же деталь одного размера во всех окнах
+  const legenda = nal ? Math.round(shrift * 4.6) : 0;
+  const sc = Math.min((pw - shrift*2.4) / B, (ph - verh - 6) / L,
+                      nal ? (ph - verh - legenda) * (nal.W/nal.H) / B : Infinity);
+  const px = i => pol + i*(pw + pol);
+  const dostupno = ph - verh - legenda;
+  const oy = pol + verh + Math.max(0, (dostupno - Math.max(L*sc, nal ? nal.H*sc*B/nal.W : 0)) / 2);
+
+  // ---- 1. маска ----
+  panel(cx, px(0), pol, pw, ph, 'маска · ' + (izmer.komponent > 1 ? izmer.komponent + ' куска, взят один' : 'один кусок'));
+  const ox0 = px(0) + shrift*2.0 + ((pw - shrift*2.4) - B*sc)/2;
+  const tmp = document.createElement('canvas'); tmp.width = B; tmp.height = L;
+  const im = tmp.getContext('2d').createImageData(B, L);
+  for (let i = 0; i < B*L; i++) {
+    const e = mv.d[i];
+    im.data[i*4] = e ? 63 : 16; im.data[i*4+1] = e ? 191 : 30;
+    im.data[i*4+2] = e ? 127 : 26; im.data[i*4+3] = 255;
   }
-  const tmp = document.createElement('canvas'); tmp.width = W; tmp.height = H;
   tmp.getContext('2d').putImageData(im, 0, 0);
   cx.imageSmoothingEnabled = false;
-  cx.drawImage(tmp, ox, oy, W*sc, H*sc);
+  cx.drawImage(tmp, ox0, oy, B*sc, L*sc);
+  cx.strokeStyle = '#e2bf5f'; cx.lineWidth = 1;
+  cx.strokeRect(ox0-.5, oy-.5, B*sc+1, L*sc+1);
 
-  cx.strokeStyle = '#e2bf5f'; cx.lineWidth = 1.5;
-  cx.strokeRect(ox + ramka.x0*sc, oy + ramka.y0*sc,
-                (ramka.x1-ramka.x0+1)*sc, (ramka.y1-ramka.y0+1)*sc);
-  if (kontur && kontur.length > 2) {
-    cx.strokeStyle = '#8fd8ff'; cx.lineWidth = 1;
-    cx.beginPath();
-    kontur.forEach(([x,y], i) => i ? cx.lineTo(ox+x*sc, oy+y*sc) : cx.moveTo(ox+x*sc, oy+y*sc));
-    cx.closePath(); cx.stroke();
+  // линейка в мм — сразу видно, во что превратятся доли
+  const mm = +opt.shirinaMm || 0;
+  if (mm > 0) {
+    const naMm = B*sc / mm;
+    let shag = 1; while (naMm*shag < 13) shag *= (shag === 1 ? 2 : (shag === 2 ? 2.5 : 2));
+    cx.strokeStyle = '#33544a'; cx.fillStyle = '#6f8a7e'; cx.lineWidth = 1;
+    cx.beginPath(); cx.moveTo(ox0-6, oy); cx.lineTo(ox0-6, oy + L*sc); cx.stroke();
+    const vsegoMm = mm * izmer.vysotaKShirine;
+    for (let v = 0; v <= vsegoMm + 1e-6; v += shag) {
+      const y = oy + (v/Math.max(vsegoMm,1e-6)) * L*sc;
+      cx.beginPath(); cx.moveTo(ox0-10, y); cx.lineTo(ox0-6, y); cx.stroke();
+      cx.save(); cx.translate(ox0-13, y+3); cx.fillText(String(+v.toFixed(1)), -shrift*1.6, 0); cx.restore();
+    }
+    cx.fillText('мм', px(0)+5, oy + L*sc + shrift*1.2);
   }
-  cx.fillStyle = '#7d948a'; cx.font = Math.max(10, Math.round(CH*0.034)) + 'px system-ui, sans-serif';
-  cx.fillText('маска · ось ' + (vert ? 'вертикальная' : 'горизонтальная') + (perevernut ? ' (перевёрнута)' : ''),
-              ox, CH - Math.round(podpis*0.35));
 
-  // профиль
-  const px0 = CW/2 + pol/2, pw = CW - px0 - pol, ph = CH - 2*pol - podpis;
-  cx.fillStyle = '#0a1310'; cx.fillRect(px0, pol, pw, ph);
-  const hh = ph / izmer.polosy.length;
-  izmer.polosy.forEach((v, i) => {
-    const w = Math.max(1, v*pw*0.92);
+  // ---- 2. профиль с просветами ----
+  panel(cx, px(1), pol, pw, ph, 'профиль · ' + POLOS + ' полос, просветы на своих местах');
+  const ox1 = px(1) + shrift*1.2 + ((pw - shrift*2.4) - B*sc)/2;
+  const hh = L*sc / POLOS;
+  const runs = izmer.runs || [];
+  for (let i = 0; i < POLOS; i++) {
     const vTele = granicy && granicy.some(([a,b],k) => i>=a && i<b && k%2===0);
     cx.fillStyle = vTele ? '#3fbf7f' : '#2a8f5e';
-    cx.fillRect(px0 + (pw-w)/2, pol + i*hh, w, Math.max(1, hh-0.7));
-  });
+    const rr = runs[i];
+    if (rr && rr.length) {
+      for (const [a, b] of rr)
+        cx.fillRect(ox1 + a*B*sc, oy + i*hh, Math.max(1, (b-a)*B*sc), Math.max(1, hh-0.6));
+    } else {
+      const w = Math.max(1, (izmer.polosy[i]||0)*B*sc);
+      cx.fillRect(ox1 + (B*sc-w)/2, oy + i*hh, w, Math.max(1, hh-0.6));
+    }
+  }
   if (granicy) {
     cx.strokeStyle = '#e2bf5f'; cx.setLineDash([4,3]); cx.lineWidth = 1;
-    granicy.forEach(([a]) => { if (!a) return;
-      cx.beginPath(); cx.moveTo(px0, pol + a*hh); cx.lineTo(px0+pw, pol + a*hh); cx.stroke(); });
+    cx.fillStyle = '#e2bf5f';
+    granicy.forEach(([a], k) => {
+      const y = oy + a*hh;
+      if (a) { cx.beginPath(); cx.moveTo(ox1-4, y); cx.lineTo(ox1+B*sc+4, y); cx.stroke(); }
+      cx.fillText(String(k+1), ox1 + B*sc + 7, y + shrift*1.1);
+    });
     cx.setLineDash([]);
   }
+
+  // ---- 3. наложение модели ----
+  if (nal) {
+    panel(cx, px(2), pol, pw, ph, 'модель поверх снимка');
+    const sc2 = sc * B / nal.W;
+    const t2 = document.createElement('canvas'); t2.width = nal.W; t2.height = nal.H;
+    t2.getContext('2d').putImageData(new ImageData(nal.rgba, nal.W, nal.H), 0, 0);
+    const ox2 = px(2) + (pw - nal.W*sc2)/2;
+    cx.drawImage(t2, ox2, oy, nal.W*sc2, nal.H*sc2);
+    let y0 = pol + ph - legenda + shrift*1.2;
+    const met = [['#3fbf7f', 'совпало ' + Math.round(nal.iou*100) + '%'],
+                 ['#5aaaff', 'есть на фото, модель не построила ' + Math.round(nal.netVModeli*100) + '%'],
+                 ['#e85858', 'модель добавила лишнее ' + Math.round(nal.lishneeVModeli*100) + '%']];
+    for (const [c, t] of met) {
+      cx.fillStyle = c; cx.fillRect(px(2)+7, y0 - shrift*0.75, shrift*0.8, shrift*0.8);
+      cx.fillStyle = '#9db3a9'; cx.fillText(t, px(2) + 7 + shrift*1.3, y0);
+      y0 += shrift*1.35;
+    }
+  }
+
+  // ---- подписи ----
   cx.fillStyle = '#7d948a';
-  cx.fillText('профиль, 40 полос · штрихи — линии реза на тела', px0, CH - Math.round(podpis*0.35));
+  const yPod = CH - Math.round(pod*0.35);
+  cx.fillText('ось ' + izmer.os + (p.perevernut ? ', перевёрнута широким концом вверх' : '') +
+              ' · ' + (A.METODY_MASKI[izmer.metod] || izmer.metod), pol, yPod);
+  const razr = (izmer.zapoln || []).filter(v => v < 0.82).length;
+  const vtoraya = [];
+  if (razr > 2) vtoraya.push('просветы в ' + razr + ' полосах из ' + POLOS + ' — деталь разрезная');
+  if (izmer.otverstie) vtoraya.push('дырка Ø' + Math.round(izmer.otverstie.dolyaD*100) + '% ширины' +
+    (izmer.otverstie.skvoznoe ? ', похоже сквозная' : ''));
+  if (vtoraya.length) cx.fillText(vtoraya.join(' · '), pol, yPod - shrift*1.5);
 }

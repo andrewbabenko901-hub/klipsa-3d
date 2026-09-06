@@ -226,6 +226,51 @@ export function profil(metka, nom, W, H, ramka, vert, N = 40) {
   return out;
 }
 
+/**
+ * Полный профиль полосы: не только огибающая, но и просветы внутри.
+ * Огибающая врёт там, где деталь разрезная: две лапки с зазором дают ту же
+ * ширину, что сплошной конус, и модель получается «грибом». Здесь для каждой
+ * полосы берётся объединение занятых столбцов по всем её строкам, из него
+ * достаются отрезки материала (runs), доля заполнения и зазор.
+ */
+export function profilPolnyj(metka, nom, W, H, ramka, vert, N = 40) {
+  const { x0, x1, y0, y1 } = ramka;
+  const a0 = vert ? y0 : x0, a1 = vert ? y1 : x1;
+  const b0 = vert ? x0 : y0, b1 = vert ? x1 : y1;
+  const L = a1 - a0 + 1, B = b1 - b0 + 1;
+  const ogib = [], telo = [], zapoln = [], runs = [], centr = [];
+  const stolb = new Uint8Array(B);
+  for (let i = 0; i < N; i++) {
+    stolb.fill(0);
+    const p0 = a0 + Math.floor(L*i/N);
+    const p1 = a0 + Math.max(Math.floor(L*i/N)+1, Math.floor(L*(i+1)/N));
+    for (let p = p0; p < p1; p++) for (let q = 0; q < B; q++) {
+      const idx = vert ? (p*W + b0 + q) : ((b0 + q)*W + p);
+      if (metka[idx] === nom) stolb[q] = 1;
+    }
+    const rr = []; let s = -1, est = 0;
+    for (let q = 0; q < B; q++) {
+      if (stolb[q]) { est++; if (s < 0) s = q; }
+      else if (s >= 0) { rr.push([s/B, q/B]); s = -1; }
+    }
+    if (s >= 0) rr.push([s/B, 1]);
+    const og = rr.length ? (rr[rr.length-1][1] - rr[0][0]) : 0;
+    ogib.push(og);
+    telo.push(est/B);
+    zapoln.push(og > 0 ? (est/B)/og : 1);
+    runs.push(rr);
+    centr.push(rr.length ? (rr[rr.length-1][1] + rr[0][0])/2 : 0.5);
+  }
+  return { ogib, telo, zapoln, runs, centr, shirinaPx: B, vysotaPx: L };
+}
+
+// Медиана — устойчивее среднего там, где одна полоса словила блик.
+export function mediana(a) {
+  if (!a.length) return 0;
+  const s = a.slice().sort((x,y)=>x-y);
+  return s.length % 2 ? s[(s.length-1)/2] : (s[s.length/2-1] + s[s.length/2])/2;
+}
+
 // ---------- контур ----------
 
 // Обход границы по Муру. Даёт замкнутый контур детали.
@@ -306,24 +351,25 @@ function pryamaya(r, i, j) {
   return { k, b, sse };
 }
 
+
 /**
  * Нарезка профиля на тела. Разбиение ищется динамическим программированием:
- * профиль приближается ломаной из K отрезков, K подбирается по штрафу за
- * лишние тела. Это устойчивее, чем резать по всплескам производной —
- * та рассыпала гладкую шейку на четыре «диска».
+ * профиль приближается ломаной из K отрезков. Считаются сразу два канала —
+ * огибающая и доля материала внутри неё; по второму каналу видно место, где
+ * сплошная шейка переходит в лапки с просветом, а по огибающей его не видно.
  * Никакой нейронки: и самостоятельный разбор, и независимый голос при сверке.
  */
-export function narezatTela(polosy, chuvstvitelnost = 0.5) {
+function podgotovka(polosy, dop) {
   const N = polosy.length, mx = Math.max(...polosy) || 1;
   const r = sgladit(polosy.map(v => v/mx), 1);
-  const MIN = Math.max(2, Math.round(N * 0.05));
-  const MAXK = 8;
+  const f = sgladit((dop && dop.zapoln && dop.zapoln.length === N)
+                    ? dop.zapoln.slice() : new Array(N).fill(1), 1);
+  const MIN = Math.max(2, Math.round(N * 0.05)), MAXK = 8;
 
-  // стоимость каждого возможного отрезка
   const cena = [];
-  for (let i = 0; i < N; i++) { cena[i] = []; for (let j = i+1; j <= N; j++) cena[i][j] = pryamaya(r, i, j).sse; }
+  for (let i = 0; i < N; i++) { cena[i] = [];
+    for (let j = i+1; j <= N; j++) cena[i][j] = pryamaya(r,i,j).sse + 1.4*pryamaya(f,i,j).sse; }
 
-  // DP: best[k][j] — лучшая сумма ошибок для первых j полос из k отрезков
   const best = [], otkuda = [];
   for (let k = 0; k <= MAXK; k++) { best[k] = new Float64Array(N+1).fill(Infinity); otkuda[k] = new Int32Array(N+1).fill(-1); }
   best[0][0] = 0;
@@ -333,31 +379,28 @@ export function narezatTela(polosy, chuvstvitelnost = 0.5) {
         const c = best[k-1][i] + cena[i][j];
         if (c < best[k][j]) { best[k][j] = c; otkuda[k][j] = i; }
       }
+  return { N, r, f, cena, best, otkuda, MAXK };
+}
 
-  // сколько отрезков: ошибку считаем в долях от ошибки одной прямой, иначе
-  // абсолютные числа мелкие и штраф всегда побеждает. Новое тело окупается,
-  // только если заметно уменьшает остаток.
-  const bazovaya = cena[0][N] || 1e-9;
-  const shtraf = 0.010 + 0.055 * (1 - chuvstvitelnost);
-  let luchK = 2, luchOcenka = Infinity;
-  for (let k = 2; k <= MAXK; k++) {
-    if (!isFinite(best[k][N])) continue;
-    const o = best[k][N]/bazovaya + shtraf*k;
-    if (o < luchOcenka) { luchOcenka = o; luchK = k; }
-  }
-
-  const rezy = new Array(luchK+1); rezy[luchK] = N;
-  for (let k = luchK; k >= 1; k--) rezy[k-1] = otkuda[k][rezy[k]];
-
+function rezyDlya(P, k) {
+  if (!isFinite(P.best[k][P.N])) return null;
+  const rezy = new Array(k+1); rezy[k] = P.N;
+  for (let t = k; t >= 1; t--) rezy[t-1] = P.otkuda[t][rezy[t]];
+  if (rezy.some(v => v < 0)) return null;
   // склейка почти сонаправленных соседей: одно тело не должно дробиться
   for (let i = 0; i + 2 < rezy.length; ) {
-    const A1 = pryamaya(r, rezy[i], rezy[i+1]), B1 = pryamaya(r, rezy[i+1], rezy[i+2]);
-    const urovenA = A1.b + A1.k*(rezy[i+1]-rezy[i])/2, urovenB = B1.b + B1.k*(rezy[i+2]-rezy[i+1])/2;
-    if (Math.abs(urovenA - urovenB) < 0.035 && Math.abs(A1.k - B1.k) < 0.008) rezy.splice(i+1, 1);
+    const A1 = pryamaya(P.r, rezy[i], rezy[i+1]), B1 = pryamaya(P.r, rezy[i+1], rezy[i+2]);
+    const uA = A1.b + A1.k*(rezy[i+1]-rezy[i])/2, uB = B1.b + B1.k*(rezy[i+2]-rezy[i+1])/2;
+    const zA = P.f.slice(rezy[i], rezy[i+1]), zB = P.f.slice(rezy[i+1], rezy[i+2]);
+    const rf = Math.abs(mediana(zA) - mediana(zB));
+    if (Math.abs(uA - uB) < 0.035 && Math.abs(A1.k - B1.k) < 0.008 && rf < 0.12) rezy.splice(i+1, 1);
     else i++;
   }
+  return rezy;
+}
 
-  const tela = [];
+function telaIz(P, rezy, dop) {
+  const { r, N } = P, tela = [];
   for (let k = 0; k < rezy.length-1; k++) {
     const a = rezy[k], b = rezy[k+1], kus = r.slice(a, b);
     const p = pryamaya(r, a, b);
@@ -369,23 +412,41 @@ export function narezatTela(polosy, chuvstvitelnost = 0.5) {
     const amplituda = Math.sqrt(ostatok.reduce((x,y)=>x+y*y,0)/ostatok.length);
     const posledniy = k === rezy.length-2;
 
+    // просветы: если внутри полосы материал идёт двумя-тремя кусками, это не
+    // сплошной конус, а лапки. Без этого две лапки читаются одной болванкой.
+    let zap = 1, kuskov = 1, zazor = 0;
+    if (dop && dop.zapoln && dop.runs) {
+      zap = mediana(dop.zapoln.slice(a, b).filter(v => v > 0)) || 1;
+      kuskov = Math.round(mediana(dop.runs.slice(a, b).map(x => x.length))) || 1;
+      if (zap < 1) zazor = +(1 - zap).toFixed(3);
+    }
+    const razreznoe = kuskov >= 2 && zap < 0.82;
+
     // короткое и широкое — это диск или плита, даже если прямая слегка наклонена:
     // наклон там от того, что кусок захватывает край соседней ступени
     const ploskoe = dolyaV <= 0.17 && uroven > 0.58 && Math.abs(naklon) < 0.34;
     const uzkoe = uroven < 0.52 && Math.abs(naklon) < 0.16;
     const rastet = naklon > 0.14;
     const suzhaetsya = naklon < -0.14;
-    const zubchatoe = kus.length >= 6 && ryab.lag >= 2 && ryab.sila > 0.14 && amplituda > 0.012;
+    const zubchatoe = kus.length >= 6 && ryab.lag >= 2 && ryab.sila > 0.19 && amplituda > 0.017;
     const elochka = zubchatoe && Math.abs(naklon) < 0.22 && uroven > 0.3;
     const rebristoe = zubchatoe && suzhaetsya;
 
     let tip = 'prochee', zub = 0, napr = 'net', sech = 'krugloe', reb = 0;
+    if (razreznoe) sech = 'razreznoe';
     if (elochka) { tip = 'elochka'; zub = Math.max(3, Math.round(kus.length / ryab.lag)); napr = 'vverh'; }
     else if (ploskoe) tip = k === 0 ? 'shlyapka_disk' : 'disk';
+    // лапки, расходящиеся книзу, — это хвостовик, а не разрезной конус:
+    // конус сходится внутрь и с фотографией расходится на треть площади
+    else if (razreznoe && rastet) tip = 'hvostovik';
+    else if (razreznoe && (suzhaetsya || posledniy)) tip = 'lapki';
     else if (posledniy && (p.b + p.k*(b-a)) < 0.34 && naklon < -0.06) {
-      tip = 'ostrie'; if (rebristoe) { sech = 'krest_s_rebrami'; reb = 4; } }
+      tip = 'ostrie'; if (rebristoe && !razreznoe) { sech = 'krest_s_rebrami'; reb = 4; } }
     else if (rastet)  tip = 'vorotnik';
-    else if (suzhaetsya) { tip = 'konus'; if (rebristoe) { sech = 'krest_s_rebrami'; reb = 4; } }
+    // широкое сужающееся не в самом низу — это воротник под шляпкой, а не
+    // сплошной конус: конус там раздувал деталь и делал её «грибом»
+    else if (suzhaetsya && !posledniy && uroven > 0.45) tip = 'vorotnik';
+    else if (suzhaetsya) { tip = 'konus'; if (rebristoe && !razreznoe) { sech = 'krest_s_rebrami'; reb = 4; } }
     else if (uzkoe)   tip = 'shejka';
     else tip = k === 0 ? 'shlyapka_disk' : 'shejka';
 
@@ -395,6 +456,7 @@ export function narezatTela(polosy, chuvstvitelnost = 0.5) {
       dolyaVysoty: +dolyaV.toFixed(3),
       dolyaShiriny: +Math.max(0.05, Math.min(1, uroven)).toFixed(3),
       suzhaetsya: suzhaetsya ? 'knizu' : (rastet ? 'kverhu' : 'net'),
+      kuskov, zapolnenie: +zap.toFixed(3), zazor,
       opisanie: OPIS[tip] || 'кусок',
       uverennost: +(0.45 + 0.18*Math.min(1, dolyaV*6) + (elochka?0.17:0) + (rebristoe?0.07:0)).toFixed(2),
       istochnik: 'алгоритм',
@@ -403,10 +465,43 @@ export function narezatTela(polosy, chuvstvitelnost = 0.5) {
   return tela;
 }
 
+export function narezatTela(polosy, chuvstvitelnost = 0.5, dop = null) {
+  const P = podgotovka(polosy, dop);
+  // сколько отрезков: ошибку считаем в долях от ошибки одной прямой, иначе
+  // абсолютные числа мелкие и штраф всегда побеждает.
+  const bazovaya = P.cena[0][P.N] || 1e-9;
+  const shtraf = 0.010 + 0.055 * (1 - chuvstvitelnost);
+  let luchK = 2, luchOcenka = Infinity;
+  for (let k = 2; k <= P.MAXK; k++) {
+    if (!isFinite(P.best[k][P.N])) continue;
+    const o = P.best[k][P.N]/bazovaya + shtraf*k;
+    if (o < luchOcenka) { luchOcenka = o; luchK = k; }
+  }
+  return telaIz(P, rezyDlya(P, luchK), dop);
+}
+
+/**
+ * Все разумные варианты нарезки — от двух тел до восьми. Сколько тел на самом
+ * деле, честнее решать не штрафом из головы, а тем, какой вариант даёт силуэт
+ * ближе к снимку: это и делает вызывающая сторона.
+ */
+export function variantyNarezki(polosy, dop = null, maxK = 8) {
+  const P = podgotovka(polosy, dop), out = [];
+  const bylo = new Set();
+  for (let k = 2; k <= Math.min(maxK, P.MAXK); k++) {
+    const rezy = rezyDlya(P, k); if (!rezy) continue;
+    const klyuch = rezy.join(',');
+    if (bylo.has(klyuch)) continue;
+    bylo.add(klyuch);
+    out.push({ k, tel: rezy.length-1, tela: telaIz(P, rezy, dop) });
+  }
+  return out;
+}
+
 const OPIS = {
   shlyapka_disk:'верхний диск', disk:'диск', shejka:'гладкая шейка',
   vorotnik:'воротник', elochka:'ёлочка с зубцами', konus:'сужающийся конус',
-  ostrie:'остриё', prochee:'кусок',
+  ostrie:'остриё', lapki:'лапки с зазором', prochee:'кусок',
 };
 
 // ---------- сборка всего вместе ----------

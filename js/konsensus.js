@@ -116,6 +116,7 @@ export function svodka(varianty) {
     secheniya: [...new Set(v.tela.map(t => t.sechenie))].join(', '),
     uverennost: +(v.uverennost ?? srednyaya(v)).toFixed(2),
     sekund: v.sekund ?? null,
+    iou: v.iou ?? null,
     sboj: v.sboj || null,
   }));
 }

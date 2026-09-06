@@ -11,6 +11,7 @@ import { sobrat, podognat, summarno, elementDlya } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
 import { vStl, skachat } from './stl.js';
 import { PROBY } from './proby.js';
+import * as SIL from './siluet.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -18,7 +19,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
-  rashod: [], granicy: null,
+  rashod: [], granicy: null, nalozhenie: null,
 };
 
 // ---------- хранилище ----------
@@ -61,7 +62,7 @@ function scenaInit() {
   const d1 = new THREE.DirectionalLight(0xffffff, 1.5); d1.position.set(24,40,30); scena.add(d1);
   const d2 = new THREE.DirectionalLight(0x9fd8bb, .5); d2.position.set(-30,12,-20); scena.add(d2);
   setkaPola = new THREE.GridHelper(120, 24, 0x1d3227, 0x152219); scena.add(setkaPola);
-  new ResizeObserver(razmer3d).observe($('#stsena'));
+  new ResizeObserver(() => { razmer3d(); if (!$('#holstMaski').hidden) risovatMasku(); }).observe($('#stsena'));
   razmer3d();
   (function tick(){ requestAnimationFrame(tick); upr.update(); ren.render(scena, kamera); })();
 }
@@ -109,7 +110,36 @@ function pererisovat() {
     nomer: $('#pNomer').value || '—', material: $('#pMaterial').value || 'пластик',
     elementov: S.els.length, vysota: gab.vysota, shirina: gab.shirina, cvet });
   listRazbora($('#listRazbora'), celoe, kuski, cvet);
-  if (S.izmer) O.narisovatRazbor($('#holstMaski'), S.izmer, S.granicy);
+  sverkaSiluetov(celoe);
+  risovatMasku();
+}
+
+// ---------- сверка силуэтов ----------
+// Ответ на «почему модель не похожа на снимок» должен быть не на словах:
+// силуэт модели кладётся на маску снимка и меряется совпадение.
+function sverkaSiluetov(geom) {
+  S.nalozhenie = null;
+  if (!S.izmer || !geom) { pokazatSovpadenie(); return; }
+  try {
+    const fot = O.maskaVyravnennaya(S.izmer);
+    const mod = SIL.siluetGeometrii(geom);
+    S.nalozhenie = SIL.sravnit(fot, mod);
+  } catch (e) { S.nalozhenie = null; }
+  pokazatSovpadenie();
+}
+
+function pokazatSovpadenie() {
+  const b = $('#sovpad'); if (!b) return;
+  const n = S.nalozhenie;
+  b.hidden = !n;
+  if (!n) return;
+  $('#sovpadPolosa').style.width = Math.round(n.iou*100) + '%';
+  const raz = Math.abs(n.vysotaModeli - n.vysotaFoto) / Math.max(n.vysotaFoto, 1e-6);
+  $('#sovpadPod').innerHTML =
+    'Силуэт совпал с фото на <b>' + Math.round(n.iou*100) + '%</b> · ' +
+    'модель добавила лишнего ' + Math.round(n.lishneeVModeli*100) + '%, ' +
+    'не построила ' + Math.round(n.netVModeli*100) + '%' +
+    (raz > 0.12 ? '<br>пропорции разошлись на ' + Math.round(raz*100) + '% по высоте' : '');
 }
 
 // ---------- обработка ----------
@@ -132,11 +162,39 @@ function obmerit(tiho) {
   } catch (e) { skazatOshibku('Обмер не вышел: ' + e.message); return null; }
 }
 
+/**
+ * Разбор без нейронки. Сколько тел — решает не штраф из головы: перебираются
+ * все нарезки от двух тел до восьми, каждая собирается в настоящую модель, и
+ * побеждает та, чей силуэт ближе всего лёг на снимок.
+ */
 function razborAlgoritmom() {
   if (!S.izmer) return null;
-  const tela = O.razborAlgoritmom(S.izmer, +$('#oChuvst').value);
-  return { istochnik:'Алгоритм по профилю', post:'algoritm', model:'изломы профиля',
-           tela, uverennost: 0.6, ves: 0.8, rashod:null, sekund:0 };
+  const chuvst = +$('#oChuvst').value;
+  let tela = O.razborAlgoritmom(S.izmer, chuvst);
+  let podpis = 'изломы профиля', uver = 0.6, iou = 0;
+  try {
+    const fot = O.maskaVyravnennaya(S.izmer);
+    const mm = +$('#pGolova').value || 16;
+    const varianty = O.variantyRazbora(S.izmer);
+    let luchshee = -1, luchshie = null, luchshieIou = 0;
+    for (const v of varianty) {
+      const sb = sobrat(v.tela, S.izmer, mm);
+      const g = geomRecepta(sb.els).celoe;
+      const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
+      if (g && g.dispose) g.dispose();
+      // небольшой штраф за лишние тела: рецепт из восьми кусков ради лишнего
+      // процента совпадения — это не модель, а мозаика
+      const o = sv ? sv.iou - 0.008*v.tel : -1;
+      if (o > luchshee) { luchshee = o; luchshieIou = sv.iou; luchshie = v.tela; }
+    }
+    if (luchshie) {
+      tela = luchshie; iou = luchshieIou;
+      podpis = 'нарезка выбрана по силуэту (' + Math.round(iou*100) + '%)';
+      uver = Math.max(0.5, Math.min(0.85, 0.3 + iou*0.7));
+    }
+  } catch (e) { /* нет WebGL — остаёмся на штрафе */ }
+  return { istochnik:'Алгоритм по профилю', post:'algoritm', model: podpis,
+           tela, uverennost: uver, ves: 0.8 + (iou > 0.7 ? 0.4 : 0), rashod:null, sekund:0 };
 }
 
 // ---------- сборка ----------
@@ -148,7 +206,7 @@ function peresobrat() {
   if (!S.tela.length || !S.izmer) return;
   const kat = katalog();
   const r = sobrat(S.tela, S.izmer, kat.shirinaMm || 16);
-  S.els = r.els; S.zam = r.zam.concat(podognat(S.els, kat));
+  S.els = r.els; S.zam = r.zam.concat(podognat(S.els, kat, S.izmer));
   S.granicy = O.granicyTel(S.izmer.polosy, S.tela.map(t => Math.max(0.02, +t.dolyaVysoty||0.1)));
   pererisovat(); pokazatRezultat(); $('#znKuskov').textContent = S.tela.length;
 }
@@ -228,7 +286,8 @@ function pokazatSravnenie() {
       : `<span class="metka ${x.uverennost>=0.75?'m-v':x.uverennost>=0.55?'m-s':'m-n'}">${x.uverennost}</span>`;
     return `<div class="otvet ${vzyat?'vzyat':''}">
       <h5>${x.istochnik}${vzyat?' <span class="metka m-i">опорный</span>':''}<span class="prav">${shapka}</span></h5>
-      <div class="klyuch">${x.model}${x.sekund?' · '+x.sekund+' с':''}</div>
+      <div class="klyuch">${x.model}${x.sekund?' · '+x.sekund+' с':''}${
+        x.iou!=null ? ' · силуэт совпал на '+Math.round(x.iou*100)+'%' : ''}</div>
       ${x.sboj ? `<div class="oshibka" style="margin-top:6px">${x.sboj}</div>`
         : `<div style="margin-top:5px"><b>${x.tel}</b> тел · сечения: ${x.secheniya}</div>
            <div class="klyuch" style="margin-top:4px">${x.sostav}</div>`}
@@ -329,7 +388,18 @@ function vstavitFoto(files) {
     fr.readAsDataURL(f);
   });
 }
-function risovatMasku() { if (S.izmer) O.narisovatRazbor($('#holstMaski'), S.izmer, S.granicy); }
+function risovatMasku() {
+  if (!S.izmer) return;
+  const cv = $('#holstMaski'), box = $('#stsena');
+  // холст под размер окна: раньше картинка 900x500 растягивалась на любую
+  // форму контейнера, и деталь на ней переставала быть собой
+  const rw = box.clientWidth || 900, rh = box.clientHeight || 420;
+  const k = Math.max(1, Math.min(2.4, 1200 / rw));   // без искажения пропорций
+  const w = Math.round(rw * k), h = Math.round(rh * k);
+  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+  O.narisovatRazbor(cv, S.izmer, S.granicy,
+    { shirinaMm: +$('#pGolova').value || 0, nalozhenie: S.nalozhenie });
+}
 function pokazatFoto() {
   const m = $('#mini'); m.innerHTML = '';
   S.foto.forEach((f, i) => {
@@ -368,6 +438,15 @@ async function sintez() {
       const p = $('#pPodskazka').value.trim(); if (p) hvost.push('Подсказка от заказчика: ' + p);
       hvost.push('Обмер силуэта, 40 полос сверху вниз: ' + S.izmer.polosy.map(v=>v.toFixed(2)).join(', '));
       hvost.push('Высота к ширине: ' + S.izmer.vysotaKShirine);
+      if (S.izmer.zapoln) {
+        hvost.push('Доля материала внутри огибающей по тем же полосам ' +
+          '(1.00 — сплошное сечение, меньше — между кусками есть просвет): ' +
+          S.izmer.zapoln.map(v => v.toFixed(2)).join(', '));
+        const kus = S.izmer.runs.map(r => r.length);
+        hvost.push('Сколько отдельных кусков материала видно в полосе: ' + kus.join(', '));
+      }
+      if (S.izmer.otverstie) hvost.push('На снимке видна сквозная дырка шириной ' +
+        Math.round(S.izmer.otverstie.dolyaD*100) + '% от ширины детали');
       const kat = katalog();
       if (kat.shirinaMm) hvost.push('Каталог: самое широкое место ' + kat.shirinaMm + ' мм');
       if (kat.dlinaShtoka) hvost.push('Каталог: длина штока ' + kat.dlinaShtoka + ' мм');
@@ -393,6 +472,7 @@ async function sintez() {
     }
 
     shag('svod','idet');
+    ocenitVariantySiluetom(S.varianty);
     S.svod = svesti(S.varianty.filter(v => v.tela && v.tela.length));
     S.tela = S.svod.tela;
     if (!S.tela.length) throw new Error('ни один источник не дал тел');
@@ -558,6 +638,61 @@ function pokazatSpravochnik() {
   }
 }
 
+/**
+ * Объективная оценка каждого источника: собрать его разбор в модель и померить,
+ * насколько силуэт лёг на снимок. Голос того, кто ближе к фото, весит больше.
+ */
+function ocenitVariantySiluetom(varianty) {
+  if (!S.izmer) return;
+  let fot; try { fot = O.maskaVyravnennaya(S.izmer); } catch { return; }
+  const mm = +$('#pGolova').value || 16;
+  for (const v of varianty) {
+    if (!v.tela || !v.tela.length) continue;
+    try {
+      const g = geomRecepta(sobrat(v.tela, S.izmer, mm).els).celoe;
+      const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
+      if (g && g.dispose) g.dispose();
+      if (sv) { v.iou = sv.iou; v.ves = (v.ves || 1) * (0.6 + 0.8*sv.iou); }
+    } catch {}
+  }
+}
+
+// ---------- подгонка по снимку ----------
+const TYANEM_MM = ['d','dLow','dCore','dBore','len','t','t2','h','w','l','span','wing',
+                   'core','spread','foot','s','okno','gap','barbD','dep','slot','slotW','bore'];
+
+async function podognatPoFoto() {
+  if (!S.els.length || !S.izmer) { skazatOshibku('Сначала собери модель по фото.', true); return; }
+  const kn = $('#knPodognat'), bylo = kn.textContent;
+  kn.disabled = true; kn.textContent = 'Подгоняю…';
+  await new Promise(r => setTimeout(r, 30));
+  try {
+    const fot = O.maskaVyravnennaya(S.izmer);
+    const r = SIL.podognatPoFoto(S.els, fot, spisok => geomRecepta(spisok).celoe);
+    if (r.stalo > r.bylo + 0.002) {
+      // совпадение силуэта считается с нормировкой по ширине, поэтому подгонка
+      // может незаметно раздуть или сжать всю деталь. Возвращаем габарит на
+      // место равномерным масштабом — форма от этого не меняется.
+      const novye = S.els.map((e, i) => Object.assign({}, e, { params: r.els[i].params }));
+      const bylG = summarno(S.els).shirina, stalG = summarno(novye).shirina;
+      const k = stalG > 0.01 ? bylG / stalG : 1;
+      if (Math.abs(k - 1) > 0.005) for (const e of novye)
+        for (const kl of Object.keys(e.params))
+          if (typeof e.params[kl] === 'number' && TYANEM_MM.includes(kl))
+            e.params[kl] = Math.round(e.params[kl] * k * 100) / 100;
+      S.els = novye;
+      S.zam = S.zam.concat(['размеры подогнаны по силуэту: совпадение ' +
+        Math.round(r.bylo*100) + '% → ' + Math.round(r.stalo*100) + '% (' + r.shagov + ' проб)']);
+      pererisovat(); pokazatRezultat(); pokazatKuski();
+      vkladka('maska');
+    } else {
+      skazatOshibku('Лучше не стало — модель уже настолько близка к снимку, ' +
+                    'насколько позволяют выбранные элементы (' + Math.round(r.bylo*100) + '%).', true);
+    }
+  } catch (e) { skazatOshibku('Подгонка не вышла: ' + e.message); }
+  kn.disabled = false; kn.textContent = bylo;
+}
+
 // ---------- вкладки ----------
 function vkladka(v) {
   $$('.vkladki button').forEach(b => b.classList.toggle('akt', b.dataset.vid === v));
@@ -571,7 +706,7 @@ function vkladka(v) {
   if (v === 'maska') risovatMasku();
   if (v === 'model') razmer3d();
   const t = { model:'ЛКМ — вращение · колесо — зум · ПКМ — сдвиг',
-    maska:'Слева — что алгоритм принял за деталь, справа — профиль по 40 полосам и линии реза',
+    maska:'Слева — что принято за деталь, в центре — профиль с просветами, справа — силуэт модели поверх снимка',
     nejro: S.nejro ? '' : 'Лист нейронкой не запрашивался — поставь галочку и синтезируй заново',
     sravnenie:'Что ответил каждый источник и где они разошлись' };
   $('#upravlenie').textContent = t[v] || '';
@@ -639,6 +774,7 @@ function start() {
 
   $('#knSintez').onclick = sintez;
   $('#knPereschitat').onclick = peresobrat;
+  $('#knPodognat').onclick = podognatPoFoto;
   $('#knObmerit').onclick = () => {
     zapomnitObrabotku();
     if (!obmerit()) return;
