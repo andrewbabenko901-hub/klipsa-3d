@@ -10,18 +10,20 @@
 {"imports":{
   "three":"./vendor/three/three.module.js",
   "three/addons/":"./vendor/three/addons/",
-  "./js/algoritmy.js":"./js/algoritmy.js?v=14",
-  "./js/elementy.js":"./js/elementy.js?v=14",
-  "./js/geom.js":"./js/geom.js?v=14",
-  "./js/konsensus.js":"./js/konsensus.js?v=14",
-  "./js/nejro.js":"./js/nejro.js?v=14",
-  "./js/obmer.js":"./js/obmer.js?v=14",
-  "./js/sborka.js":"./js/sborka.js?v=14",
-  "./js/shema.js":"./js/shema.js?v=14",
-  "./js/siluet.js":"./js/siluet.js?v=14",
-  "./js/stl.js":"./js/stl.js?v=14",
-  "./js/vidy.js":"./js/vidy.js?v=14",
-  "./js/main.js":"./js/main.js?v=14"
+  "./js/algoritmy.js":"./js/algoritmy.js?v=15",
+  "./js/kruglost.js":"./js/kruglost.js?v=15",
+  "./js/objyom.js":"./js/objyom.js?v=15",
+  "./js/elementy.js":"./js/elementy.js?v=15",
+  "./js/geom.js":"./js/geom.js?v=15",
+  "./js/konsensus.js":"./js/konsensus.js?v=15",
+  "./js/nejro.js":"./js/nejro.js?v=15",
+  "./js/obmer.js":"./js/obmer.js?v=15",
+  "./js/sborka.js":"./js/sborka.js?v=15",
+  "./js/shema.js":"./js/shema.js?v=15",
+  "./js/siluet.js":"./js/siluet.js?v=15",
+  "./js/stl.js":"./js/stl.js?v=15",
+  "./js/vidy.js":"./js/vidy.js?v=15",
+  "./js/main.js":"./js/main.js?v=15"
 }}
 </script>
 </head>
@@ -31,7 +33,7 @@
   <div class="znak">K</div>
   <div class="rastyanut">
     <h1>Разбор клипсы — 3D по фотографии</h1>
-    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v14</span></div>
+    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v15</span></div>
   </div>
   <div class="prav">
     <div class="plotnost" title="Плотность вёрстки">
@@ -123,6 +125,8 @@
           <div class="podskazka">Контрольный вид спереди рисуется всегда и сверяется
             с настоящим снимком. Не совпало — все нарисованные виды отбрасываются,
             обмер идёт по фотографии.</div></div>
+        <label class="stroka"><input type="checkbox" id="chObjyom">
+          достроить виды по объёму (image→3D, нужен ключ и прокси)</label>
         <label class="stroka"><input type="checkbox" id="chList">
           рисовать лист нейронкой (нужен биллинг)</label>
         <button class="knopka glav" id="knSintez" style="margin-top:9px">Синтезировать 3D-модель</button>
@@ -130,6 +134,7 @@
         <ul class="shagi" id="shagi" style="margin-top:10px">
           <li data-shag="obmer"><span class="t"></span>Обмер силуэта — у нас, бесплатно</li>
           <li data-shag="vidy"><span class="t"></span>Эталонные виды нейронкой</li>
+          <li data-shag="objyom"><span class="t"></span>Объём из фото и виды с него</li>
           <li data-shag="razbor"><span class="t"></span>Разбор на примитивы</li>
           <li data-shag="svod"><span class="t"></span>Сведение голосов</li>
           <li data-shag="sborka"><span class="t"></span>Сборка модели и рецепта</li>
@@ -254,6 +259,13 @@
     <div class="mini" id="miniShablon"></div>
     <div class="podskazka">Шаблон — чистый лист без единой буквы. Эталон с таблицей класть нельзя:
       модель начинает копировать с него текст, а иногда и саму деталь.</div>
+
+    <h3 class="razdel">Объём из фото — недостающие виды</h3>
+    <div id="objyomNastrojki"></div>
+    <div class="podskazka">Сеть достраивает по снимку 3D-меш, мы снимаем с него ортогональные
+      виды сбоку и сверху и <b>выбрасываем меш</b>: деталь всё равно собирается из наших
+      элементов. Вид спереди служит проверкой — если ни один поворот меша не лёг на снимок,
+      всё отбрасывается.</div>
   </div>
   <footer><button class="knopka" id="knZakrytNastrojki">Закрыть</button></footer>
 </dialog>
@@ -264,6 +276,6 @@
   <footer><button class="knopka" id="knZakrytSpravochnik">Закрыть</button></footer>
 </dialog>
 
-<script type="module" src="js/main.js?v=14"></script>
+<script type="module" src="js/main.js?v=15"></script>
 </body>
 </html>
