@@ -107,11 +107,22 @@ const KLYUCHI_PO_RUSSKI = {
   'видовНаФото':'vidovNaFoto', 'видов_на_фото':'vidovNaFoto',
   'сомнения':'somneniya', 'уверенностьОбщая':'uverennostObshchaya',
 };
+// Правильные имена полей в нижнем регистре — чтобы поймать «uVerennost»,
+// «DolyaVysoty» и прочие вольности с заглавными буквами.
+const PRAVILNYE = {};
+for (const k of ['nomer','tip','sechenie','rebra','zubcov','napravlenieZubcov','dolyaVysoty',
+                 'dolyaShiriny','suzhaetsya','opisanie','uverennost','tela','tipDetali',
+                 'vidovNaFoto','somneniya','uverennostObshchaya'])
+  PRAVILNYE[k.toLowerCase()] = k;
+
 function poLatinice(v) {
   if (Array.isArray(v)) return v.map(poLatinice);
   if (!v || typeof v !== 'object') return v;
   const o = {};
-  for (const [k, z] of Object.entries(v)) o[KLYUCHI_PO_RUSSKI[k] || k] = poLatinice(z);
+  for (const [k, z] of Object.entries(v)) {
+    const imya = KLYUCHI_PO_RUSSKI[k] || PRAVILNYE[String(k).toLowerCase()] || k;
+    o[imya] = poLatinice(z);
+  }
   return o;
 }
 
