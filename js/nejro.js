@@ -99,11 +99,15 @@ async function poslat(url, zagolovki, telo, imya, sekund) {
       throw new Error(imya + ': выбранная бесплатная модель сейчас занята у провайдера. ' +
         'Возьми другую из списка — например minimax/minimax-m3:free — или повтори через минуту. ' +
         'Ответ поставщика: ' + m);
-    if (r.status === 402 || /more credits|insufficient|can only afford/i.test(m))
-      throw new Error(imya + ': не хватает кредитов на счёте. ' +
-        'Пополни счёт у поставщика — либо переключи «Через кого рисовать» на ' +
-        '«Свой адрес» и рисуй бесплатно через свой Cloudflare Worker ' +
-        '(модель @cf/black-forest-labs/flux-1-schnell). Ответ поставщика: ' + m);
+    if (r.status === 402 || /more credits|insufficient|can only afford|credit limit/i.test(m))
+      throw new Error(imya + ': не хватает кредитов на счёте, платные модели этого ' +
+        'поставщика работать не будут, пока счёт пуст. Бесплатные пути есть, оба рабочие:\n' +
+        '• для РАЗБОРА — у OpenRouter возьми модель, чьё имя кончается на :free ' +
+        '(например minimax/minimax-m3:free), а у «Своего адреса» бесплатны все модели ' +
+        '@cf/... через твой Cloudflare Worker;\n' +
+        '• для РИСОВАНИЯ — переключи «Через кого рисовать» на «Свой адрес», ' +
+        'модель @cf/black-forest-labs/flux-1-schnell.\n' +
+        'Ответ поставщика: ' + m);
     throw new Error(imya + ' ответил ' + r.status + ': ' + m);
   }
   if (!j) throw new Error(imya + ': ответ не разобрался');
