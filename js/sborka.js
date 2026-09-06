@@ -130,10 +130,26 @@ export function sobrat(tela, izmer, razmerMm, vidy) {
         otkudaSech = 'по двум видам: сбоку в ' + o.toFixed(2) + ' раза ' +
                      (o < 1 ? 'уже' : 'шире') + ', чем спереди';
       } else otkudaSech = 'по двум видам: сечение круглое';
-    } else if (SZHATIE_PO_SECHENIYU[sechenie]) {
-      szhatie = SZHATIE_PO_SECHENIYU[sechenie];
-      dopusk(nomer + ': сечение «' + sechenie + '», второго вида нет — глубина принята ' +
-             Math.round(szhatie*100) + '% от ширины');
+    } else {
+      // Второго снимка нет — спрашиваем свет. У круглого тела яркость поперёк
+      // идёт куполом, у плоской грани ровной наклонной линией. Это третий
+      // голос: он говорит «круглое или плоское», но не насколько плоское.
+      const kr = M.kruglost;
+      if (kr && kr.uverennost >= 0.5 && (!sechenie || sechenie === 'krugloe')) {
+        if (kr.okruglost < 0.38) {
+          sechenie = 'pryamougolnoe';
+          otkudaSech = 'по светотени на снимке: ' + kr.pochemu +
+                       ' (уверенность ' + Math.round(kr.uverennost*100) + '%)';
+        } else if (kr.okruglost > 0.62) {
+          otkudaSech = 'по светотени на снимке: ' + kr.pochemu +
+                       ' (уверенность ' + Math.round(kr.uverennost*100) + '%)';
+        }
+      }
+      if (SZHATIE_PO_SECHENIYU[sechenie]) {
+        szhatie = SZHATIE_PO_SECHENIYU[sechenie];
+        dopusk(nomer + ': сечение «' + sechenie + '», второго вида нет — глубина принята ' +
+               Math.round(szhatie*100) + '% от ширины');
+      }
     }
 
     let k = elementDlya(t.tip, sechenie);

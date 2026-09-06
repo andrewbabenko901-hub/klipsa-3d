@@ -22,15 +22,17 @@ function podgotovit() {
  * (вдоль X). Ширина кадра берётся по нужной оси, а не по большей из двух:
  * иначе сплющенная модель в профиль показывалась бы с полями.
  */
-export function siluetGeometrii(geom, SW = 260, ugol = 0) {
+export function siluetGeometrii(geom, SW = 260, ugol = 0, sverhu = false) {
   if (!geom) return null;
   podgotovit();
   geom.computeBoundingBox();
   const bb = geom.boundingBox;
   const sx = bb.max.x - bb.min.x, sy = bb.max.y - bb.min.y, sz = bb.max.z - bb.min.z;
   const rad = ugol * Math.PI / 180;
-  const w = Math.max(1e-6, Math.abs(sx*Math.cos(rad)) + Math.abs(sz*Math.sin(rad)));
-  const h = Math.max(sy, 1e-6);
+  // вид сверху — это взгляд вдоль оси детали: кадр становится X на Z
+  const w = sverhu ? Math.max(sx, 1e-6)
+                   : Math.max(1e-6, Math.abs(sx*Math.cos(rad)) + Math.abs(sz*Math.sin(rad)));
+  const h = sverhu ? Math.max(sz, 1e-6) : Math.max(sy, 1e-6);
   const W = SW, H = Math.max(8, Math.min(1400, Math.round(SW * h / w)));
 
   if (mesh) { scena.remove(mesh); mesh.material.dispose(); mesh = null; }
@@ -41,8 +43,8 @@ export function siluetGeometrii(geom, SW = 260, ugol = 0) {
 
   kam.left = -w/2; kam.right = w/2; kam.top = h/2; kam.bottom = -h/2;
   const dal = Math.max(sx, sy, sz) * 4;
-  kam.position.set(Math.sin(rad)*dal, 0, Math.cos(rad)*dal);
-  kam.up.set(0, 1, 0);
+  if (sverhu) { kam.position.set(0, dal, 0); kam.up.set(0, 0, -1); }
+  else { kam.position.set(Math.sin(rad)*dal, 0, Math.cos(rad)*dal); kam.up.set(0, 1, 0); }
   kam.lookAt(0, 0, 0);
   kam.updateProjectionMatrix();
 

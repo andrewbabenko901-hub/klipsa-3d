@@ -1,6 +1,7 @@
 // Обмер силуэта в браузере. Метод обработки выбирается пользователем,
 // маску и профиль видно глазами — не чёрный ящик.
 import * as A from './algoritmy.js';
+import { yarkostPoPolosam, kruglostTela } from './kruglost.js';
 
 export const POLOS = 40;
 
@@ -113,8 +114,8 @@ export function obmerit(img, opt = {}) {
   let sr=0, sg=0, sb=0, n2=0;
   for (let i = 0; i < N; i++) if (metka[i] === vyb.nom) { sr+=px[i*4]; sg+=px[i*4+1]; sb+=px[i*4+2]; n2++; }
   let cvet = n2 ? [Math.round(sr/n2), Math.round(sg/n2), Math.round(sb/n2)] : [74,132,92];
-  const yark = Math.max(...cvet);
-  if (yark < 70) cvet = cvet.map(v => Math.min(255, Math.round(v*70/Math.max(yark,1))));
+  const yarkCveta = Math.max(...cvet);
+  if (yarkCveta < 70) cvet = cvet.map(v => Math.min(255, Math.round(v*70/Math.max(yarkCveta,1))));
 
   const shir = vert ? (vyb.x1-vyb.x0+1) : (vyb.y1-vyb.y0+1);
   const vys  = vert ? (vyb.y1-vyb.y0+1) : (vyb.x1-vyb.x0+1);
@@ -123,6 +124,13 @@ export function obmerit(img, opt = {}) {
   const otv = najtiOtverstie(dyry, W, H, ramka, vert, perevernut);
 
   const grani = A.vnutrenniyeGrani(px, W, H, metka, vyb.nom, n.porogGranej ?? 26);
+
+  // поперечные профили яркости — по ним видно, круглое сечение или плоское
+  const yark = yarkostPoPolosam(px, metka, vyb.nom, W, H, ramka, vert, perevernut, POLOS);
+  // сколько вообще светотени на детали — без неё судить о сечении нельзя
+  let svMin = 2, svMax = -1;
+  for (const r of yark) if (r) for (const v of r) { if (v < svMin) svMin = v; if (v > svMax) svMax = v; }
+  const svetRazmah = svMax > 0 ? +(svMax - svMin).toFixed(3) : 0;
 
   // контур для показа и для оценки изломов
   const kont = A.kontur(metka, vyb.nom, W, H);
@@ -137,7 +145,7 @@ export function obmerit(img, opt = {}) {
     polosy: ogib.map(x => +(x/mx).toFixed(4)),      // огибающая (как раньше)
     polosyTelo: telo.map(x => +(x/mx).toFixed(4)),  // сколько на самом деле материала
     zapoln: zapoln.map(x => +x.toFixed(4)),         // доля материала внутри огибающей
-    runs, centr,
+    runs, centr, yark, svetRazmah,
     otverstie: otv,
     komponent: spisok.length,
     uglovTura: uproshchyon.length,
@@ -264,7 +272,9 @@ export function meriTelo(izmer, a, b) {
   const o = izmer.otverstie;
   if (o && o.poVysote >= a/N - 0.03 && o.poVysote <= b/N + 0.03) otverstie = o;
 
-  return { a, b, polos: n, dolyaVysoty: n/N,
+  const kruglost = kruglostTela(izmer, a, b);
+
+  return { a, b, polos: n, dolyaVysoty: n/N, kruglost,
            verh, niz, max, min, sredn, grebni, vpadina,
            zapoln, kuskov, material, prosvet, otverstie,
            grebnej: verhi.length, vpadin: vpadiny.length,
@@ -426,6 +436,7 @@ function risovatOdinVid(cx, v, px, y0, pw, rh, shrift, verh, opt) {
   const B = mv.W, L = mv.H;
   const imya = ({ speredi:'спереди', sboku:'сбоку', sverhu:'сверху' }[v.rol] || 'вид') +
                (v.izModeli ? ' · построен моделью, снимка нет'
+                : v.izObjyoma ? ' · снят с объёма, построенного по фото'
                 : v.izNejronki ? ' · нарисован нейронкой' : '');
   const legenda = nal ? Math.round(shrift * 4.4) : 0;
   const dostupno = rh - verh;

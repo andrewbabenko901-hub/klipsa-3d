@@ -11,6 +11,7 @@ import { sobrat, podognat, summarno, elementDlya, masshtab } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
 import { vStl, skachat } from './stl.js';
 import * as SIL from './siluet.js';
+import * as OB from './objyom.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -19,7 +20,7 @@ const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
   rashod: [], granicy: null, nalozhenie: null, masshtab: null,
-  izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null, kontrolVida: null,
+  izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null, kontrolVida: null, objyom: null,
 };
 
 // ---------- хранилище ----------
@@ -29,6 +30,7 @@ const LS = {
   get klyuchi(){ return this.j('klyuchi', {}); }, set klyuchi(v){ this.s('klyuchi', v); },
   get modeli(){ return this.j('modeli', {}); },  set modeli(v){ this.s('modeli', v); },
   get adresa(){ return this.j('adresa', {}); },  set adresa(v){ this.s('adresa', v); },
+  get objyom(){ return this.j('objyom', { post:'fal' }); }, set objyom(v){ this.s('objyom', v); },
   get vkl(){ return this.j('vkl', { gemini:true }); }, set vkl(v){ this.s('vkl', v); },
   get obr(){ return this.j('obr', {}); },        set obr(v){ this.s('obr', v); },
   get plotnost(){ return +(localStorage.getItem('klipsa.plotnost') || 1); },
@@ -130,8 +132,9 @@ function pererisovat() {
 // Вид сверху так не сравнить, он служит только для формы сечения.
 function maskiVidov() {
   const UGOL = { speredi: 0, sboku: 90 };
-  return (S.izmery || []).filter(v => v.izmer && UGOL[v.rol] !== undefined)
-    .map(v => ({ rol: v.rol, ugol: UGOL[v.rol], maska: O.maskaVyravnennaya(v.izmer) }))
+  return (S.izmery || []).filter(v => (v.izmer || v.maskaGotovaya) && UGOL[v.rol] !== undefined)
+    .map(v => ({ rol: v.rol, ugol: UGOL[v.rol],
+                 maska: v.maskaGotovaya || O.maskaVyravnennaya(v.izmer) }))
     .filter(v => v.maska);
 }
 
@@ -202,6 +205,58 @@ function obmerit(tiho) {
   if (nm) $('#znMetod').textContent = nm.split(' —')[0].toLowerCase();
   $('#znVidov').textContent = S.izmery.filter(v => v.izmer).length;
   return S.izmer;
+}
+
+/**
+ * Достроить виды через объём: снимок -> 3D-меш -> ортогональные силуэты.
+ *
+ * Меш не становится результатом. С него снимаются виды, дальше он выбрасывается,
+ * а деталь всё равно собирается из наших элементов по силуэтам — правило
+ * «никаких чужих 3D-моделей в выдаче» не нарушается.
+ */
+async function dostroitPoObjyomu() {
+  const n = LS.objyom, p = OB.POSTAVSHCHIKI_OBJYOMA[n.post] || OB.POSTAVSHCHIKI_OBJYOMA.fal;
+  if (!n.klyuch) throw new Error('Для объёма нужен ключ ' + p.imya + '.');
+  const front = (S.izmery || []).find(v => v.rol === 'speredi' && v.izmer && !v.izNejronki);
+  if (!front) throw new Error('Нет снимка спереди.');
+  const kartinki = S.foto.slice(0, 3).map(f => 'data:' + (f.mime||'image/png') + ';base64,' + f.b64);
+
+  const r = await OB.poluchitObjyom({ post:n.post, klyuch:n.klyuch, model:n.model,
+                                      adres:n.adres, kartinki });
+  S.rashod.push({ istochnik:'объём', post:n.post, model:n.model || p.modeli[0], kartinok:1 });
+  const geom = OB.vypryamit(await OB.zagruzitGeometriyu(r.glb));
+
+  const fot = O.maskaVyravnennaya(front.izmer);
+  const v = OB.vidyIzObjyoma(geom, fot);
+  const porog = +$('#oPorogVida').value || 0.8;
+  S.objyom = { iou: v.iou, ugol: v.ugol, sekund: r.sekund };
+  if (v.iou < porog) {
+    geom.dispose();
+    S.zam.push('объём построен, но его вид спереди совпал со снимком только на ' +
+      Math.round(v.iou*100) + '% (нужно ' + Math.round(porog*100) + '%) — виды с него отброшены');
+    return { ok:false, iou:v.iou };
+  }
+
+  // вид сбоку — то, ради чего всё затевалось
+  const pm = O.polosyMaski(v.sboku);
+  if (!(S.izmery || []).some(x => x.rol === 'sboku' && x.izmer)) {
+    // псевдо-обмер: полос и пропорций хватает, чтобы посчитать сечение
+    const psevdo = { polosy: pm.polosy, runs: pm.runs, zapoln: pm.zapoln,
+                     os: 'вертикально', vysotaKShirine: +(v.sboku.H / v.sboku.W).toFixed(4),
+                     izObjyoma: true };
+    S.izmery.push({ rol:'sboku', nomer:S.izmery.length+1, izObjyoma:true, izNejronki:true,
+                    izmer: psevdo, maskaGotovaya: v.sboku, polosy: pm.polosy, runs: pm.runs,
+                    iouKontrolya: v.iou });
+    S.vidy = O.sopostavitVidy(S.izmer, psevdo);
+  }
+  // сечение по виду сверху — самая честная его оценка
+  const okr = OB.okruglostKontura(v.sverhu);
+  S.objyom.okruglostSverhu = okr;
+  S.zam.push('объём: вид спереди сошёлся на ' + Math.round(v.iou*100) + '% при повороте ' +
+    v.ugol + '°' + (okr != null ? ', контур сверху округлый на ' + Math.round(okr*100) + '%' : '') +
+    ' — виды сбоку и сверху сняты с меша, сам меш выброшен');
+  geom.dispose();
+  return { ok:true, iou:v.iou, okruglostSverhu:okr };
 }
 
 /**
@@ -387,6 +442,9 @@ function pokazatRezultat() {
     vz.insertAdjacentHTML('beforeend', `<li>Высота к ширине ${S.izmer.vysotaKShirine}</li>`);
     vz.insertAdjacentHTML('beforeend', `<li>Цвет детали — со снимка</li>`);
   }
+  const poSvetu = (S.els||[]).filter(e => /светотени/.test(e.otkudaSech||'')).length;
+  if (poSvetu) vz.insertAdjacentHTML('beforeend',
+    `<li>Сечение ${poSvetu} тел определено по светотени на снимке</li>`);
   S.tela.forEach(t => { if (t.sechenie && t.sechenie !== 'krugloe')
     vz.insertAdjacentHTML('beforeend', `<li>Сечение «${t.sechenie}», рёбер ${t.rebra||0}</li>`); });
   if (!vz.children.length) vz.innerHTML = '<li class="tiho">пока ничего</li>';
@@ -434,6 +492,10 @@ function zamerStroka(i) {
                           ', гребней ' + M.grebnej);
   if (M.prosvet > 0.015) ch.push('просвет ' + p(M.prosvet) + ' в ' + M.kuskov + ' кусках');
   if (M.otverstie) ch.push('дырка ' + p(M.otverstie.dolyaD));
+  const kr = M.kruglost;
+  if (kr) ch.push(kr.uverennost < 0.5 ? 'свет: ' + kr.pochemu
+    : 'свет: ' + (kr.okruglost > 0.62 ? 'круглое' : kr.okruglost < 0.38 ? 'плоское' : 'не решается') +
+      ' (' + Math.round(kr.okruglost*100) + '%, уверенность ' + Math.round(kr.uverennost*100) + '%)');
   return ch.join(' · ');
 }
 
@@ -533,8 +595,10 @@ function risovatMasku() {
   // форму контейнера, и деталь на ней переставала быть собой
   const nalPoRoli = {};
   if (S.svodkaVidov) for (const x of S.svodkaVidov.vidy) nalPoRoli[x.rol] = x;
-  const vidy = (S.izmery || []).filter(v => v.izmer).map(v =>
-    ({ rol: v.rol, izmer: v.izmer, granicy: S.granicy, nal: nalPoRoli[v.rol] || null }));
+  const vidy = (S.izmery || []).filter(v => v.izmer || v.maskaGotovaya).map(v =>
+    ({ rol: v.rol, izmer: v.maskaGotovaya ? null : v.izmer, maska: v.maskaGotovaya || null,
+       polosy: v.polosy, runs: v.runs, izNejronki: v.izNejronki, izObjyoma: v.izObjyoma,
+       granicy: S.granicy, nal: nalPoRoli[v.rol] || null }));
 
   // Снимка сбоку нет — показываем, каким видит бок сама модель. Так видно,
   // что она построила по глубине, и есть с чем спорить руками.
@@ -611,6 +675,14 @@ async function sintez() {
         if (!r.ok) skazatOshibku('Нарисованные виды не прошли сверку с фото — ' +
           'разбор идёт по фотографии. Подробности в «Додумано моделью».', false);
       } catch (e) { shag('vidy','sboj'); skazatOshibku(perevesti(e.message)); }
+    }
+
+    if ($('#chObjyom').checked) {
+      shag('objyom','idet');
+      try {
+        const r = await dostroitPoObjyomu();
+        shag('objyom', r.ok ? 'est' : 'sboj');
+      } catch (e) { shag('objyom','sboj'); skazatOshibku(perevesti(e.message)); }
     }
 
     S.varianty = [];
@@ -809,6 +881,38 @@ function pokazatPostavshchikov() {
     c.appendChild(d);
   }
 }
+function pokazatObjyom() {
+  const c = $('#objyomNastrojki'); if (!c) return;
+  const n = LS.objyom, p = OB.POSTAVSHCHIKI_OBJYOMA[n.post] || OB.POSTAVSHCHIKI_OBJYOMA.fal;
+  c.innerHTML = `
+    <div class="postavshchik">
+      <div class="verh"><span class="tochka ${n.klyuch?'est':''}"></span><b>${p.imya}</b></div>
+      <div class="para">
+        <div class="pole"><label>Сервис</label><select data-o="post">${
+          Object.entries(OB.POSTAVSHCHIKI_OBJYOMA).map(([k,x]) =>
+            `<option value="${k}"${k===n.post?' selected':''}>${x.imya}</option>`).join('')}</select></div>
+        <div class="pole"><label>Модель</label>${
+          p.modeli.length
+            ? `<select data-o="model">${p.modeli.map(m=>`<option${m===n.model?' selected':''}>${m}</option>`).join('')}</select>`
+            : `<input type="text" data-o="model" value="${(n.model||'').replace(/"/g,'&quot;')}" placeholder="путь модели">`}</div>
+      </div>
+      <div class="para" style="margin-top:7px">
+        <div class="pole"><label>Ключ</label>
+          <input type="password" data-o="klyuch" value="${(n.klyuch||'').replace(/"/g,'&quot;')}" autocomplete="off" placeholder="ключ сервиса"></div>
+        <div class="pole"><label>Адрес (свой прокси)</label>
+          <input type="text" data-o="adres" value="${(n.adres||p.adresPoUmolchaniyu||'').replace(/"/g,'&quot;')}" placeholder="${p.adresPoUmolchaniyu||'https://свой-сервер'}"></div>
+      </div>
+      <div class="podskazka">${p.podskazka}${p.gdeKlyuch ? ` <a href="${p.gdeKlyuch}" target="_blank" rel="noopener">получить ключ</a>` : ''}</div>
+    </div>`;
+  c.querySelectorAll('[data-o]').forEach(el => {
+    const sob = el.tagName === 'SELECT' ? 'onchange' : 'oninput';
+    el[sob] = e => {
+      const o = LS.objyom; o[e.target.dataset.o] = e.target.value.trim(); LS.objyom = o;
+      if (e.target.dataset.o === 'post') { o.model = ''; o.adres = ''; LS.objyom = o; pokazatObjyom(); }
+    };
+  });
+}
+
 function obnovitKtoSprashivat() {
   const k = $('#ktoSprashivat'); const klyuchi = LS.klyuchi, vkl = LS.vkl, modeli = LS.modeli;
   k.innerHTML = Object.entries(N.POSTAVSHCHIKI).map(([id,p]) => {
@@ -927,7 +1031,7 @@ async function shablonPoUmolchaniyu() {
 function start() {
   plotnost(LS.plotnost);
   scenaInit(); pokazatIstoriyu(); pokazatSpravochnik(); pokazatRezultat();
-  pokazatPostavshchikov(); obnovitKtoSprashivat();
+  pokazatPostavshchikov(); pokazatObjyom(); obnovitKtoSprashivat();
 
   // выпадающие списки методов
   $('#oMaska').innerHTML = Object.entries(A.METODY_MASKI).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
@@ -968,7 +1072,8 @@ function start() {
   addEventListener('paste', ev => { if (ev.clipboardData?.files?.length) vstavitFoto(ev.clipboardData.files); });
 
   $('#knSintez').onclick = sintez;
-  $('#chVidy').onchange = e => { $('#poleVidy').hidden = !e.target.checked; };
+  $('#chVidy').onchange = e => { $('#poleVidy').hidden = !e.target.checked && !$('#chObjyom').checked; };
+  $('#chObjyom').onchange = e => { $('#poleVidy').hidden = !e.target.checked && !$('#chVidy').checked; };
   $('#oPorogVida').oninput = e => { $('#znPorogVida').textContent = Math.round(e.target.value*100) + '%'; };
   $('#knPereschitat').onclick = peresobrat;
   $('#knPodognat').onclick = podognatPoFoto;
