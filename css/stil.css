@@ -287,3 +287,15 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
 
 /* строка замера под каждым куском */
 .podskazka.zamer{color:#6f8a7e;font-size:calc(9.5px*var(--m));opacity:.85}
+
+/* роль каждого снимка: спереди / сбоку / сверху */
+.mini figure{height:calc(88px*var(--m));width:calc(78px*var(--m));display:flex;flex-direction:column}
+.mini img{height:calc(60px*var(--m));flex:none}
+.mini figcaption{position:static;background:none;padding:calc(2px*var(--m));width:100%}
+.mini figcaption select{width:100%;font-size:calc(9px*var(--m));padding:calc(2px*var(--m));
+  background:#0f1a15;color:var(--tekst);border:1px solid var(--linia);
+  border-radius:calc(4px*var(--m));cursor:pointer}
+
+/* окно разбора на два-три вида — ему нужно больше высоты */
+.stsena.vidov2{min-height:calc(430px*var(--m))}
+.stsena.vidov3{min-height:calc(620px*var(--m))}
