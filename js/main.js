@@ -21,6 +21,12 @@ const $$ = s => [...document.querySelectorAll(s)];
  *  нейронке на разбор и на лист нужна фотография, а не чужой рисунок. */
 const svoiFoto = () => { const f = S.foto.filter(x => !x.izLista); return f.length ? f : S.foto; };
 
+// Сколько своих снимков берём. Четыре — это классический комплект видов:
+// спереди, сбоку, сверху, снизу. Больше не нужно: пятый вид ничего не добавляет
+// к силуэту, а место в запросе к нейронке съедает.
+const PREDEL_FOTO = 4;
+const PO_UMOLCHANIYU = ['speredi','sboku','sverhu','snizu'];
+
 // v17: у Google картиночные модели имеют Free Tier «недоступен» — на бесплатном
 // ключе они отвечают 429 всегда. Кто ещё стоял на Google, разово переводим на
 // OpenRouter: там те же модели и биллинг Google не нужен. Вернуть можно в окне.
@@ -226,7 +232,7 @@ function obmerit(tiho) {
   const nastr = nastrojkiObrabotki();
   S.izmery = [];
   S.foto.forEach((f, i) => {
-    if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
+    if (!f.rol) f.rol = PO_UMOLCHANIYU[i] || 'sboku';
     const zapis = { rol: f.rol, nomer: i+1, izLista: !!f.izLista };
     try { zapis.izmer = O.obmerit(f.img, nastr); }
     catch (e) { zapis.izmer = null; zapis.sboj = e.message; }
@@ -281,7 +287,7 @@ async function dostroitPoObjyomu() {
   if (!n.klyuch) throw new Error('Для объёма нужен ключ ' + p.imya + '.');
   const front = (S.izmery || []).find(v => v.rol === 'speredi' && v.izmer && !v.izNejronki);
   if (!front) throw new Error('Нет снимка спереди.');
-  const kartinki = svoiFoto().slice(0, 3).map(f => 'data:' + (f.mime||'image/png') + ';base64,' + f.b64);
+  const kartinki = svoiFoto().slice(0, PREDEL_FOTO).map(f => 'data:' + (f.mime||'image/png') + ';base64,' + f.b64);
 
   const r = await OB.poluchitObjyom({ post:n.post, klyuch:n.klyuch, model:n.model,
                                       adres:n.adres, kartinki });
@@ -357,12 +363,30 @@ async function dorisovatVidy() {
     await new Promise((res, rej) => { im.onload = res; im.onerror = () => rej(new Error('картинка не открылась')); im.src = url; });
     return im;
   };
+  // Лист собирается по мере рисования: каждый готовый вид сразу ложится в сетку,
+  // поэтому если четвёртый не нарисуется, три предыдущих всё равно видно.
+  S.listVidov = [];
   const narisovat = async rol => {
     const r = await N.narisovatCherez(ris.post, gk, model, fotoFront,
                                       promtVida(rol, podskazka), ris.adres,
                                       promtVidaKratko(rol));
     S.rashod.push({ istochnik: 'вид ' + rol, post: ris.post, model, kartinok: 1 });
     return r;
+  };
+  const NAZVANIE = { speredi:'спереди', sboku:'сбоку', sverhu:'сверху',
+                     snizu:'снизу', izometr:'изометрия' };
+  const pokazatList = (zagolovok) => {
+    const kletki = S.listVidov.map(v => `
+      <figure style="margin:0">
+        <img src="${v.kartinka}" style="width:100%;display:block;border-radius:6px">
+        <figcaption class="tiho" style="text-align:center;padding:4px 0">
+          ${NAZVANIE[v.rol] || v.rol}${v.podpis ? ' · ' + v.podpis : ''}</figcaption>
+      </figure>`).join('');
+    $('#nejroList').innerHTML =
+      `<div style="padding:10px">
+         <div class="podskazka" style="margin-bottom:8px">${zagolovok}</div>
+         <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">${kletki}</div>
+       </div>`;
   };
 
   // 1. контрольный вид спереди
@@ -371,36 +395,66 @@ async function dorisovatVidy() {
   const sv = SIL.sravnit(O.maskaVyravnennaya(front.izmer), O.maskaVyravnennaya(izmK), 200);
   const iou = sv ? sv.iou : 0;
   S.kontrolVida = { iou, porog, kartinka: k.kartinka };
+  S.listVidov.push({ rol:'speredi', kartinka:k.kartinka,
+                     podpis:'совпал со снимком на ' + Math.round(iou*100) + '%' });
   // показываем, что именно нарисовала нейронка — и когда прошло, и когда нет
-  $('#nejroList').innerHTML =
-    `<div style="padding:10px"><div class="podskazka" style="margin-bottom:6px">
-       Контрольный вид спереди, нарисован нейронкой. Совпал со снимком на
-       <b>${Math.round(iou*100)}%</b> при пороге ${Math.round(porog*100)}%.</div>
-     <img src="${k.kartinka}" style="max-width:100%"></div>`;
+  pokazatList('Лист видов от нейронки. Контрольный вид спереди совпал со снимком на ' +
+              '<b>' + Math.round(iou*100) + '%</b> при пороге ' + Math.round(porog*100) + '%.');
   if (iou < porog) {
     S.zam.push('нейронка нарисовала деталь на ' + Math.round(iou*100) + '% похожую на снимок ' +
                '(нужно ' + Math.round(porog*100) + '%) — все нарисованные виды отброшены, мерим по фото');
     return { ok: false, iou };
   }
 
-  // 2. вид сбоку — его-то и не хватает
-  const nuzhen = !(S.izmery || []).some(v => v.rol === 'sboku' && v.izmer);
-  if (!nuzhen) return { ok: true, iou, dobavleno: 0 };
-  const b = await narisovat('sboku');
-  const izmB = O.obmerit(await zagruzit(b.kartinka), nastr);
-  const sogl = O.soglasieVysot(front.izmer, izmB);
-  if (sogl < 0.3) {
-    S.zam.push('вид сбоку нарисован, но ступени профиля на нём стоят на других высотах ' +
-               '(согласие ' + sogl + ') — вид отброшен');
-    return { ok: false, iou, sogl };
+  // 2. вид сбоку — единственный, который идёт в обмер: он даёт сечение.
+  //    Остальные два рисуются для листа, чтобы человек видел деталь целиком.
+  let sogl = null, dobavleno = 0;
+  const nuzhenBok = !(S.izmery || []).some(v => v.rol === 'sboku' && v.izmer && !v.izNejronki);
+  if (nuzhenBok) {
+    const b = await narisovat('sboku');
+    const izmB = O.obmerit(await zagruzit(b.kartinka), nastr);
+    sogl = O.soglasieVysot(front.izmer, izmB);
+    S.listVidov.push({ rol:'sboku', kartinka:b.kartinka,
+                       podpis: sogl < 0.3 ? 'ступени не сошлись, вид отброшен'
+                                          : 'ступени сошлись на ' + Math.round(sogl*100) + '%' });
+    pokazatList('Лист видов от нейронки. Контрольный вид совпал на <b>' +
+                Math.round(iou*100) + '%</b>.');
+    if (sogl < 0.3) {
+      S.zam.push('вид сбоку нарисован, но ступени профиля на нём стоят на других высотах ' +
+                 '(согласие ' + sogl + ') — вид отброшен');
+    } else {
+      S.izmery.push({ rol:'sboku', nomer: S.izmery.length+1, izmer: izmB,
+                      izNejronki: true, kartinka: b.kartinka, iouKontrolya: iou, soglasie: sogl });
+      S.vidy = O.sopostavitVidy(S.izmer, izmB);
+      dobavleno = 1;
+      S.zam.push('вид сбоку нарисован нейронкой: контрольный вид совпал со снимком на ' +
+                 Math.round(iou*100) + '%, ступени сошлись на ' + Math.round(sogl*100) + '% — ' +
+                 'сечение взято с него, миллиметры по-прежнему с фотографии');
+    }
   }
-  S.izmery.push({ rol:'sboku', nomer: S.izmery.length+1, izmer: izmB,
-                  izNejronki: true, kartinka: b.kartinka, iouKontrolya: iou, soglasie: sogl });
-  S.vidy = O.sopostavitVidy(S.izmer, izmB);
-  S.zam.push('вид сбоку нарисован нейронкой: контрольный вид совпал со снимком на ' +
-             Math.round(iou*100) + '%, ступени сошлись на ' + Math.round(sogl*100) + '% — ' +
-             'сечение взято с него, миллиметры по-прежнему с фотографии');
-  return { ok: true, iou, sogl, dobavleno: 1 };
+
+  // 3. вид сверху и изометрия — только на лист. По ним ничего не мерят:
+  //    сверху даёт форму сечения глазами, изометрия — общее понимание формы.
+  //    Если своё фото такого вида уже есть, рисовать не надо.
+  for (const rol of ['sverhu', 'izometr']) {
+    if (rol === 'sverhu' && (S.izmery || []).some(v => v.rol === 'sverhu' && v.izmer)) continue;
+    try {
+      const v = await narisovat(rol);
+      S.listVidov.push({ rol, kartinka: v.kartinka,
+                         podpis: rol === 'izometr' ? 'для понимания формы, не для обмера'
+                                                   : 'форма сечения' });
+      pokazatList('Лист видов от нейронки. Контрольный вид совпал на <b>' +
+                  Math.round(iou*100) + '%</b>.');
+    } catch (e) {
+      S.zam.push('вид «' + (NAZVANIE[rol] || rol) + '» нарисовать не вышло: ' + e.message);
+    }
+  }
+
+  pokazatList('Лист видов от нейронки: ' + S.listVidov.length + ' вида. Контрольный вид ' +
+              'спереди совпал со снимком на <b>' + Math.round(iou*100) + '%</b> при пороге ' +
+              Math.round(porog*100) + '%. В обмер уходит только вид сбоку — он даёт сечение; ' +
+              'миллиметры всегда с фотографии.');
+  return { ok: true, iou, sogl, dobavleno };
 }
 
 /**
@@ -647,9 +701,10 @@ function vstavitFoto(files) {
   if (!kartinki.length) return skazatOshibku(
     'Это не картинка: ' + spisok.map(f=>f.name||'файл').join(', ') + '. Нужен JPG, PNG или WEBP. HEIC с айфона пересохрани в JPG.');
   const svoih = S.foto.filter(f => !f.izLista).length;
-  if (svoih >= 3) return skazatOshibku('Уже три снимка, больше не влезет. Виды с листа — отдельно, ниже.');
+  if (svoih >= PREDEL_FOTO) return skazatOshibku(
+    'Уже ' + PREDEL_FOTO + ' снимка, больше не влезет. Виды с листа — отдельно, ниже.');
   skazatOshibku('');
-  kartinki.slice(0, 3 - svoih).forEach(f => {
+  kartinki.slice(0, PREDEL_FOTO - svoih).forEach(f => {
     const fr = new FileReader();
     fr.onload = () => {
       const im = new Image();
@@ -712,7 +767,7 @@ function pokazatFoto() {
   S.foto.forEach((f, i) => {
     const fg = document.createElement('figure');
     if (f.izLista) fg.classList.add('sLista');
-    if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
+    if (!f.rol) f.rol = PO_UMOLCHANIYU[i] || 'sboku';
     fg.innerHTML = `<img src="${f.url}" alt=""><button class="x">✕</button>
       ${f.izLista ? '<span class="metka">с листа</span>' : ''}
       <figcaption><select class="rol">${Object.entries(O.ROLI).map(([k,v]) =>
