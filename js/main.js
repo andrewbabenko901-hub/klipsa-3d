@@ -12,15 +12,35 @@ import { chertyozh, listRazbora } from './vidy.js';
 import { vStl, skachat } from './stl.js';
 import * as SIL from './siluet.js';
 import * as OB from './objyom.js';
+import { narezatList } from './narezka.js';
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
+
+/** Только настоящие снимки: нарисованные виды с листа сюда не попадают —
+ *  нейронке на разбор и на лист нужна фотография, а не чужой рисунок. */
+const svoiFoto = () => { const f = S.foto.filter(x => !x.izLista); return f.length ? f : S.foto; };
+
+// v17: у Google картиночные модели имеют Free Tier «недоступен» — на бесплатном
+// ключе они отвечают 429 всегда. Кто ещё стоял на Google, разово переводим на
+// OpenRouter: там те же модели и биллинг Google не нужен. Вернуть можно в окне.
+try {
+  if (!localStorage.getItem('klipsa.migr17')) {
+    const r = JSON.parse(localStorage.getItem('klipsa.risovalka') || 'null');
+    if (r && r.post === 'gemini') {
+      localStorage.setItem('klipsa.risovalka', JSON.stringify({ ...r, post: 'openrouter' }));
+      localStorage.setItem('klipsa.modelKartinki', 'google/gemini-3.1-flash-image');
+    }
+    localStorage.setItem('klipsa.migr17', '1');
+  }
+} catch {}
 
 const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
   rashod: [], granicy: null, nalozhenie: null, masshtab: null,
   izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null, kontrolVida: null, objyom: null,
+  list: null, listOtbroshen: null,
 };
 
 // ---------- хранилище ----------
@@ -37,7 +57,7 @@ const LS = {
   set plotnost(v){ localStorage.setItem('klipsa.plotnost', String(v)); },
   get modelKartinki(){ return localStorage.getItem('klipsa.modelKartinki') || N.MODELI_KARTINOK[0]; },
   set modelKartinki(v){ localStorage.setItem('klipsa.modelKartinki', v); },
-  get risovalka(){ return this.j('risovalka', { post:'gemini', adres:'' }); },
+  get risovalka(){ return this.j('risovalka', { post:'openrouter', adres:'' }); },
   set risovalka(v){ this.s('risovalka', v); },
   get shablon(){ return this.j('shablon', null); }, set shablon(v){ this.s('shablon', v); },
   get istoria(){ return this.j('istoria', []); },  set istoria(v){ this.s('istoria', v.slice(0,40)); },
@@ -193,10 +213,15 @@ function obmerit(tiho) {
   S.izmery = [];
   S.foto.forEach((f, i) => {
     if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
-    try { S.izmery.push({ rol: f.rol, nomer: i+1, izmer: O.obmerit(f.img, nastr) }); }
-    catch (e) { S.izmery.push({ rol: f.rol, nomer: i+1, izmer: null, sboj: e.message }); }
+    const zapis = { rol: f.rol, nomer: i+1, izLista: !!f.izLista };
+    try { zapis.izmer = O.obmerit(f.img, nastr); }
+    catch (e) { zapis.izmer = null; zapis.sboj = e.message; }
+    S.izmery.push(zapis);
   });
-  const vid = r => (S.izmery.find(v => v.rol === r) || {}).izmer || null;
+  proveritList();
+  // снимок всегда старше нарисованного: если роль есть у обоих, берём снимок
+  const vid = r => (S.izmery.find(v => v.rol === r && v.izmer && !v.izLista)
+                 || S.izmery.find(v => v.rol === r && v.izmer) || {}).izmer || null;
   S.izmer = vid('speredi') || (S.izmery.find(v => v.izmer) || {}).izmer || null;
   if (!S.izmer) {
     if (!tiho) skazatOshibku('Обмер не вышел: ' + (S.izmery[0]?.sboj || 'деталь не найдена'));
@@ -207,6 +232,27 @@ function obmerit(tiho) {
   if (nm) $('#znMetod').textContent = nm.split(' —')[0].toLowerCase();
   $('#znVidov').textContent = S.izmery.filter(v => v.izmer).length;
   return S.izmer;
+}
+
+/**
+ * Виды с листа меряются наравне с фотографией, но верить им можно только
+ * после очной ставки: если вид спереди с листа не лёг на настоящий снимок,
+ * значит нейронка нарисовала не эту деталь — и весь лист отбрасывается.
+ * Порог тот же, что у дорисовки видов.
+ */
+function proveritList() {
+  S.listOtbroshen = null; S.listSovpal = null;
+  const fo = S.izmery.find(v => !v.izLista && v.rol === 'speredi' && v.izmer);
+  const li = S.izmery.find(v =>  v.izLista && v.rol === 'speredi' && v.izmer);
+  if (!fo || !li) return;
+  const a = O.maskaVyravnennaya(fo.izmer), b = O.maskaVyravnennaya(li.izmer);
+  const sr = (a && b) ? SIL.sravnit(a, b) : null;
+  if (!sr) return;
+  const porog = +($('#oPorogVida')?.value || 0.8);
+  if (sr.iou < porog) {
+    S.listOtbroshen = { iou: sr.iou, porog };
+    S.izmery = S.izmery.filter(v => !v.izLista);
+  } else S.listSovpal = sr.iou;
 }
 
 /**
@@ -221,7 +267,7 @@ async function dostroitPoObjyomu() {
   if (!n.klyuch) throw new Error('Для объёма нужен ключ ' + p.imya + '.');
   const front = (S.izmery || []).find(v => v.rol === 'speredi' && v.izmer && !v.izNejronki);
   if (!front) throw new Error('Нет снимка спереди.');
-  const kartinki = S.foto.slice(0, 3).map(f => 'data:' + (f.mime||'image/png') + ';base64,' + f.b64);
+  const kartinki = svoiFoto().slice(0, 3).map(f => 'data:' + (f.mime||'image/png') + ';base64,' + f.b64);
 
   const r = await OB.poluchitObjyom({ post:n.post, klyuch:n.klyuch, model:n.model,
                                       adres:n.adres, kartinki });
@@ -284,7 +330,7 @@ async function dorisovatVidy() {
   const podskazka = $('#pPodskazka').value.trim();
 
   const front = (S.izmery || []).find(v => v.rol === 'speredi' && v.izmer && !v.izNejronki);
-  const fotoFront = S.foto[(front ? front.nomer : 1) - 1] || S.foto[0];
+  const fotoFront = S.foto[(front ? front.nomer : 1) - 1] || svoiFoto()[0];
   if (!front || !fotoFront) throw new Error('Нет снимка спереди — с чем сверять.');
 
   const zagruzit = async url => {
@@ -580,9 +626,10 @@ function vstavitFoto(files) {
   const kartinki = spisok.filter(f => f.type.startsWith('image/'));
   if (!kartinki.length) return skazatOshibku(
     'Это не картинка: ' + spisok.map(f=>f.name||'файл').join(', ') + '. Нужен JPG, PNG или WEBP. HEIC с айфона пересохрани в JPG.');
-  if (S.foto.length >= 3) return skazatOshibku('Уже три фото, больше не влезет.');
+  const svoih = S.foto.filter(f => !f.izLista).length;
+  if (svoih >= 3) return skazatOshibku('Уже три снимка, больше не влезет. Виды с листа — отдельно, ниже.');
   skazatOshibku('');
-  kartinki.slice(0, 3 - S.foto.length).forEach(f => {
+  kartinki.slice(0, 3 - svoih).forEach(f => {
     const fr = new FileReader();
     fr.onload = () => {
       const im = new Image();
@@ -644,14 +691,96 @@ function pokazatFoto() {
   const m = $('#mini'); m.innerHTML = '';
   S.foto.forEach((f, i) => {
     const fg = document.createElement('figure');
+    if (f.izLista) fg.classList.add('sLista');
     if (!f.rol) f.rol = ['speredi','sboku','sverhu'][i] || 'sboku';
     fg.innerHTML = `<img src="${f.url}" alt=""><button class="x">✕</button>
+      ${f.izLista ? '<span class="metka">с листа</span>' : ''}
       <figcaption><select class="rol">${Object.entries(O.ROLI).map(([k,v]) =>
         `<option value="${k}"${k===f.rol?' selected':''}>${v.split(' —')[0]}</option>`).join('')}</select></figcaption>`;
     fg.querySelector('.x').onclick = () => { S.foto.splice(i,1); pokazatFoto(); if (S.foto.length) { obmerit(true); peresobrat(); risovatMasku(); } };
     fg.querySelector('.rol').onchange = e => { f.rol = e.target.value; obmerit(true); peresobrat(); risovatMasku(); };
     m.appendChild(fg);
   });
+}
+
+// ---------- лист с видами, нарисованный руками ----------
+/*
+ * Картинку по шаблону проще получить на странице самой нейронки: там рисуют
+ * бесплатно, а по ключу тем же моделям нужен биллинг. Значит лист приходит
+ * сюда файлом, приложение само находит на нём панели, режет и раздаёт роли,
+ * а дальше каждый вид идёт в обычный обмер — наравне со снимком.
+ */
+function vstavitList(files) {
+  const f = [...files].find(x => x.type && x.type.startsWith('image/'));
+  if (!f) return skazatOshibku('Нужна картинка листа: JPG, PNG или WEBP.');
+  const fr = new FileReader();
+  fr.onload = () => {
+    const im = new Image();
+    im.onload = () => {
+      let r;
+      try { r = narezatList(im); }
+      catch (e) { return skazatOshibku('Лист не разрезался: ' + e.message); }
+      if (!r.paneli.length) return skazatOshibku(r.sboj || 'На листе не нашлось ни одного вида.');
+      S.list = { ...r, imya: f.name };
+      skazatOshibku('');
+      pokazatList();
+    };
+    im.onerror = () => skazatOshibku('Файл не открылся как картинка.');
+    im.src = fr.result;
+  };
+  fr.readAsDataURL(f);
+}
+
+function pokazatList() {
+  const box = $('#listVidy'); if (!box) return;
+  if (!S.list) { box.innerHTML = ''; $('#listItog').textContent = ''; return; }
+  const roli = { ...O.ROLI, propustit: 'Не брать — изометрия или лишнее' };
+  box.innerHTML = '';
+  S.list.paneli.forEach((p, i) => {
+    const fg = document.createElement('figure');
+    fg.innerHTML = `<img src="${p.dataUrl}" alt="">
+      <figcaption><select class="rol">${Object.entries(roli).map(([k, v]) =>
+        `<option value="${k}"${k === p.rol ? ' selected' : ''}>${v.split(' —')[0]}</option>`).join('')}</select></figcaption>`;
+    fg.title = 'симметрия ' + p.sym + ', заполнение ' + p.zapoln;
+    fg.querySelector('.rol').onchange = e => { p.rol = e.target.value; };
+    box.appendChild(fg);
+  });
+  const setka = S.list.setka || {};
+  $('#listItog').textContent =
+    `Нашлось ${S.list.paneli.length} панел${S.list.paneli.length === 1 ? 'ь' : 'и'}` +
+    (setka.stolbcov ? `, сетка ${setka.stolbcov}×${setka.strok}` : '') +
+    '. Проверь роли и нажми «Взять виды».';
+}
+
+async function vzyatIzLista() {
+  if (!S.list) return skazatOshibku('Сначала загрузи лист.');
+  const brat = S.list.paneli.filter(p => p.rol && p.rol !== 'propustit');
+  if (!brat.length) return skazatOshibku('Ни один вид не выбран: все роли стоят «не брать».');
+  S.foto = S.foto.filter(f => !f.izLista);          // прошлый лист заменяем целиком
+  const gotovo = await Promise.all(brat.map(p => new Promise(res => {
+    const im = new Image();
+    im.onload  = () => res({ url: p.dataUrl, img: im, imya: 'лист: ' + p.rol,
+                             b64: p.dataUrl.split(',')[1], mime: 'image/png',
+                             rol: p.rol, izLista: true });
+    im.onerror = () => res(null);
+    im.src = p.dataUrl;
+  })));
+  gotovo.filter(Boolean).forEach(f => S.foto.push(f));
+  pokazatFoto();
+  if (obmerit()) { peresobrat(); risovatMasku(); }
+  if (S.listOtbroshen) skazatOshibku(
+    `Виды с листа отброшены: вид спереди с листа совпал со снимком лишь на ` +
+    `${Math.round(S.listOtbroshen.iou*100)}% при пороге ${Math.round(S.listOtbroshen.porog*100)}%. ` +
+    `Нейронка нарисовала не эту деталь. Обмер идёт по фотографии.`);
+  else if (S.listSovpal != null) skazatOshibku(
+    `Виды с листа приняты, совпадение с фотографией ${Math.round(S.listSovpal*100)}%.`, true);
+  else skazatOshibku('Виды с листа приняты. Сверить их не с чем — своего снимка спереди нет.', true);
+}
+
+function ubratList() {
+  S.list = null; S.foto = S.foto.filter(f => !f.izLista);
+  pokazatList(); pokazatFoto();
+  if (S.foto.length && obmerit(true)) { peresobrat(); risovatMasku(); }
 }
 
 // ---------- главный прогон ----------
@@ -718,7 +847,7 @@ async function sintez() {
         const model = modeli[post] || N.POSTAVSHCHIKI[post].modeli[0];
         try {
           if (!model) throw new Error('не задано имя модели — впиши его в «Нейронки и ключи»');
-          const r = await N.razobrat(post, klyuchi[post].trim(), model, S.foto, dop,
+          const r = await N.razobrat(post, klyuchi[post].trim(), model, svoiFoto(), dop,
                                      (LS.adresa[post] || N.POSTAVSHCHIKI[post].adresPoUmolchaniyu || '').trim());
           r.ves = 1; S.rashod.push({ istochnik:r.istochnik, post, model, rashod:r.rashod });
           return r;
@@ -757,8 +886,8 @@ async function sintez() {
       else if (!sh) { shag('list','sboj'); skazatOshibku('Нет шаблона вёрстки — положи его в настройках.'); }
       else try {
         const r2 = ris.post === 'gemini'
-          ? await N.narisovatList(gk, LS.modelKartinki, sh, S.foto[0], promtKartinki(S.tela))
-          : await N.narisovatCherez(ris.post, gk, LS.modelKartinki, [sh, S.foto[0]],
+          ? await N.narisovatList(gk, LS.modelKartinki, sh, svoiFoto()[0], promtKartinki(S.tela))
+          : await N.narisovatCherez(ris.post, gk, LS.modelKartinki, [sh, svoiFoto()[0]],
                                     promtKartinki(S.tela), ris.adres);
         S.nejro = r2.kartinka;
         S.rashod.push({ istochnik:'картинка', post:ris.post, model:LS.modelKartinki, kartinok:1 });
@@ -1093,6 +1222,22 @@ function start() {
     }
     vstavitFoto([]);
   });
+
+  const dropL = $('#dropList'), fajlList = $('#fajlList');
+  if (dropL) {
+    dropL.onclick = () => fajlList.click();
+    fajlList.onchange = () => vstavitList(fajlList.files);
+    ['dragenter','dragover'].forEach(e => dropL.addEventListener(e, ev => {
+      ev.preventDefault(); dropL.classList.add('nad'); }));
+    ['dragleave','drop'].forEach(e => dropL.addEventListener(e, ev => {
+      ev.preventDefault(); dropL.classList.remove('nad'); }));
+    dropL.addEventListener('drop', ev => {
+      if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length)
+        vstavitList(ev.dataTransfer.files);
+    });
+    $('#knVzyatVidy').onclick = vzyatIzLista;
+    $('#knUbratList').onclick = ubratList;
+  }
   addEventListener('paste', ev => { if (ev.clipboardData?.files?.length) vstavitFoto(ev.clipboardData.files); });
 
   $('#knSintez').onclick = sintez;

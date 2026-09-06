@@ -298,10 +298,7 @@ export const POSTAVSHCHIKI = {
       if (!r.ok) throw new Error(j?.detail || j?.title || ('HTTP ' + r.status));
       const vse = (j.data||[]).map(m => m.id);
       // модальность в списке не указана — отбираем по имени, зрячие вперёд
-      const zryachie = vse.filter(id =>
-        /vision|-vl|vlm|llava|neva|kosmos|fuyu|gemma-3|paligemma|internvl|pixtral|maverick|scout|deplot/i.test(id));
-      const spisok = [...zryachie.sort(), ...vse.filter(id => !zryachie.includes(id)).sort()];
-      spisok.zryachih = zryachie.length;
+      const spisok = zryachieVpered(vse);
       return spisok;
     },
     async razobrat(klyuch, model, foto, promt, adres) {
@@ -346,9 +343,9 @@ export const POSTAVSHCHIKI = {
       const r = await fetch(u + '/models', { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
       const j = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
-      const spisok = (j.data || j.models || []).map(m => m.id || m.name).filter(Boolean).sort();
-      if (!spisok.length) throw new Error('адрес ответил, но список моделей пуст');
-      return spisok;
+      const vse = (j.data || j.models || []).map(m => m.id || m.name).filter(Boolean);
+      if (!vse.length) throw new Error('адрес ответил, но список моделей пуст');
+      return zryachieVpered(vse);
     },
     async razobrat(klyuch, model, foto, promt, adres) {
       const soderzhanie = [{ type:'text', text: promt }];
@@ -364,6 +361,19 @@ export const POSTAVSHCHIKI = {
     },
   },
 };
+
+/**
+ * Зрячие модели вперёд, и посчитать сколько их. Имена у всех поставщиков
+ * разные, но узнаваемые: llama-4-scout и maverick видят картинки, хотя слова
+ * vision в имени нет.
+ */
+export function zryachieVpered(vse) {
+  const zryachie = vse.filter(id =>
+    /vision|-vl|vl-|vlm|llava|neva|kosmos|fuyu|gemma-3|paligemma|internvl|pixtral|maverick|scout|moondream|aya-vision|deplot/i.test(id));
+  const spisok = [...zryachie.sort(), ...vse.filter(id => !zryachie.includes(id)).sort()];
+  spisok.zryachih = zryachie.length;
+  return spisok;
+}
 
 // Приводим введённый адрес к базе: с протоколом, без хвостового слэша и без
 // уже дописанного /chat/completions.
@@ -446,19 +456,22 @@ export const CENY_KARTINOK = { 'gemini-3.1-flash-image':0.067, 'gemini-3.1-flash
  * платятся они его кредитами: биллинг Google не нужен вовсе.
  */
 export const RISOVALKI = {
-  gemini:     { imya: 'Google напрямую (нужен биллинг Google)',
-                modeli: ['gemini-3.1-flash-image','gemini-3.1-flash-lite-image',
-                         'gemini-3-pro-image','gemini-2.5-flash-image'] },
-  openrouter: { imya: 'OpenRouter (биллинг Google не нужен)',
+  openrouter: { imya: 'OpenRouter — те же модели Google, биллинг Google не нужен',
                 modeli: ['google/gemini-3.1-flash-image','google/gemini-3.1-flash-lite-image',
                          'google/gemini-2.5-flash-image','google/gemini-3-pro-image',
                          'openai/gpt-5-image-mini'] },
-  svoj:       { imya: 'Свой адрес (например бесплатный Cloudflare Worker)',
+  gemini:     { imya: 'Google напрямую — картинкам нужен биллинг на ключе',
+                modeli: ['gemini-3.1-flash-image','gemini-3.1-flash-lite-image',
+                         'gemini-3-pro-image','gemini-2.5-flash-image'] },
+  svoj:       { imya: 'Свой адрес — Cloudflare Worker или шлюз на своём сервере',
                 modeli: ['@cf/black-forest-labs/flux-1-schnell',
                          '@cf/black-forest-labs/flux-2-klein-4b',
                          '@cf/runwayml/stable-diffusion-v1-5-img2img',
                          '@cf/stabilityai/stable-diffusion-xl-base-1.0',
-                         '@cf/bytedance/stable-diffusion-xl-lightning'] },
+                         '@cf/bytedance/stable-diffusion-xl-lightning',
+                         'black-forest-labs/flux.1-schnell',
+                         'black-forest-labs/flux.1-dev',
+                         'stabilityai/stable-diffusion-3.5-large'] },
 };
 
 /** Нарисовать картинку через выбранного поставщика. */
