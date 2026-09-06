@@ -66,11 +66,31 @@ export function proverZagolovki(zagolovki, imya) {
   }
 }
 
-async function poslat(url, zagolovki, telo, imya) {
+/**
+ * Сколько ждать ответа. Без потолка одна задумчивая модель вешает весь синтез:
+ * рассуждающие модели вроде nemotron думают минутами, а пользователь видит
+ * бесконечное «идёт» и не понимает, кто виноват.
+ */
+export const ZHDAT_SEKUND = 150;
+
+async function poslat(url, zagolovki, telo, imya, sekund) {
   proverZagolovki(zagolovki, imya);
+  const predel = (sekund || ZHDAT_SEKUND) * 1000;
+  const strazh = new AbortController();
+  const budilnik = setTimeout(() => strazh.abort(), predel);
   let r;
-  try { r = await fetch(url, { method:'POST', headers:zagolovki, body:JSON.stringify(telo) }); }
-  catch (e) { throw new Error(imya + ': сеть не пустила запрос (' + e.message + ')'); }
+  try {
+    r = await fetch(url, { method:'POST', headers:zagolovki,
+                           body:JSON.stringify(telo), signal: strazh.signal });
+  }
+  catch (e) {
+    if (e && e.name === 'AbortError')
+      throw new Error(imya + ': модель не ответила за ' + Math.round(predel/1000) +
+        ' секунд и запрос снят. Рассуждающие модели бывают очень медленными — ' +
+        'возьми другую из списка или повтори позже.');
+    throw new Error(imya + ': сеть не пустила запрос (' + e.message + ')');
+  }
+  finally { clearTimeout(budilnik); }
   const t = await r.text();
   let j = null; try { j = JSON.parse(t); } catch {}
   if (!r.ok) {
@@ -323,8 +343,10 @@ export const POSTAVSHCHIKI = {
     imya: 'OpenRouter — много моделей одним ключом',
     gdeKlyuch: 'https://openrouter.ai/keys',
     // Проверено живыми запросами 6 сентября: minimax отвечает за 14 с и даёт
-    // готовый JSON с телами; nemotron от NVIDIA тоже зрячий и бесплатный, но
-    // медленнее и упирается в лимит провайдера; gemma сейчас глухо отбивает 429.
+    // готовый JSON с телами — на нём и стоим. nemotron от NVIDIA зрячий и
+    // бесплатный, но это рассуждающая модель: на полном промпте она думала
+    // больше двух с половиной минут и не ответила, плюс упирается в лимит
+    // провайдера. Берём её только осознанно. gemma сейчас глухо отбивает 429.
     modeli: ['minimax/minimax-m3:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
              'openrouter/free','google/gemma-4-31b-it:free',
              'google/gemini-2.5-flash','qwen/qwen2.5-vl-72b-instruct','meta-llama/llama-4-maverick'],
