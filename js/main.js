@@ -37,6 +37,8 @@ const LS = {
   set plotnost(v){ localStorage.setItem('klipsa.plotnost', String(v)); },
   get modelKartinki(){ return localStorage.getItem('klipsa.modelKartinki') || N.MODELI_KARTINOK[0]; },
   set modelKartinki(v){ localStorage.setItem('klipsa.modelKartinki', v); },
+  get risovalka(){ return this.j('risovalka', { post:'gemini', adres:'' }); },
+  set risovalka(v){ this.s('risovalka', v); },
   get shablon(){ return this.j('shablon', null); }, set shablon(v){ this.s('shablon', v); },
   get istoria(){ return this.j('istoria', []); },  set istoria(v){ this.s('istoria', v.slice(0,40)); },
 };
@@ -272,8 +274,10 @@ async function dostroitPoObjyomu() {
  * даёт форму сечения — то, чего на одном фото нет в принципе.
  */
 async function dorisovatVidy() {
-  const gk = (LS.klyuchi.gemini || '').trim();
-  if (!gk) throw new Error('Для эталонных видов нужен ключ Google.');
+  const ris = LS.risovalka;
+  const gk = (LS.klyuchi[ris.post === 'svoj' ? 'svoj' : ris.post] || '').trim();
+  if (!gk) throw new Error('Для эталонных видов нужен ключ: ' +
+    (N.RISOVALKI[ris.post]?.imya || ris.post) + '. Впиши его в «Нейронки и ключи».');
   const model = LS.modelKartinki;
   const porog = +$('#oPorogVida').value || 0.8;
   const nastr = nastrojkiObrabotki();
@@ -289,8 +293,9 @@ async function dorisovatVidy() {
     return im;
   };
   const narisovat = async rol => {
-    const r = await N.narisovatVid(gk, model, fotoFront, promtVida(rol, podskazka));
-    S.rashod.push({ istochnik: 'вид ' + rol, post: 'gemini', model, kartinok: 1 });
+    const r = await N.narisovatCherez(ris.post, gk, model, fotoFront,
+                                      promtVida(rol, podskazka), ris.adres);
+    S.rashod.push({ istochnik: 'вид ' + rol, post: ris.post, model, kartinok: 1 });
     return r;
   };
 
@@ -744,14 +749,19 @@ async function sintez() {
 
     if ($('#chList').checked) {
       shag('list','idet');
-      const gk = (LS.klyuchi.gemini||'').trim();
+      const ris = LS.risovalka;
+      const gk = (LS.klyuchi[ris.post === 'svoj' ? 'svoj' : ris.post]||'').trim();
       const sh = S.shablon || LS.shablon;
-      if (!gk) { shag('list','sboj'); skazatOshibku('Для листа картинкой нужен ключ Google.'); }
+      if (!gk) { shag('list','sboj'); skazatOshibku('Для листа картинкой нужен ключ: ' +
+        (N.RISOVALKI[ris.post]?.imya || ris.post) + '.'); }
       else if (!sh) { shag('list','sboj'); skazatOshibku('Нет шаблона вёрстки — положи его в настройках.'); }
       else try {
-        const r2 = await N.narisovatList(gk, LS.modelKartinki, sh, S.foto[0], promtKartinki(S.tela));
+        const r2 = ris.post === 'gemini'
+          ? await N.narisovatList(gk, LS.modelKartinki, sh, S.foto[0], promtKartinki(S.tela))
+          : await N.narisovatCherez(ris.post, gk, LS.modelKartinki, [sh, S.foto[0]],
+                                    promtKartinki(S.tela), ris.adres);
         S.nejro = r2.kartinka;
-        S.rashod.push({ istochnik:'картинка', post:'gemini', model:LS.modelKartinki, kartinok:1 });
+        S.rashod.push({ istochnik:'картинка', post:ris.post, model:LS.modelKartinki, kartinok:1 });
         $('#nejroList').innerHTML = `<img src="${S.nejro}" style="width:100%">`;
         shag('list','est');
       } catch (e) { shag('list','sboj'); skazatOshibku(perevesti(e.message)); }
@@ -881,6 +891,20 @@ function pokazatPostavshchikov() {
     c.appendChild(d);
   }
 }
+function pokazatRisovalku() {
+  const r = LS.risovalka;
+  $('#nRisovalka').innerHTML = Object.entries(N.RISOVALKI)
+    .map(([k,v]) => `<option value="${k}"${k===r.post?' selected':''}>${v.imya}</option>`).join('');
+  const spisok = N.RISOVALKI[r.post]?.modeli || [];
+  const sel = $('#nModelKartinka');
+  sel.innerHTML = spisok.map(m=>`<option${m===LS.modelKartinki?' selected':''}>${m}</option>`).join('');
+  if (spisok.length && !spisok.includes(LS.modelKartinki)) {
+    LS.modelKartinki = spisok[0]; sel.value = spisok[0];
+  }
+  $('#poleRisAdres').hidden = r.post !== 'svoj';
+  $('#nRisAdres').value = r.adres || '';
+}
+
 function pokazatObjyom() {
   const c = $('#objyomNastrojki'); if (!c) return;
   const n = LS.objyom, p = OB.POSTAVSHCHIKI_OBJYOMA[n.post] || OB.POSTAVSHCHIKI_OBJYOMA.fal;
@@ -1037,7 +1061,7 @@ function start() {
   $('#oMaska').innerHTML = Object.entries(A.METODY_MASKI).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
   $('#oKomponenta').innerHTML = Object.entries(O.METODY_KOMPONENTY).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
   $('#oOs').innerHTML = Object.entries(O.METODY_OSI).map(([k,v])=>`<option value="${k}">${v}</option>`).join('');
-  $('#nModelKartinka').innerHTML = N.MODELI_KARTINOK.map(m=>`<option${m===LS.modelKartinki?' selected':''}>${m}</option>`).join('');
+  pokazatRisovalku();
   const obr = LS.obr;
   if (obr.maska) $('#oMaska').value = obr.maska;
   if (obr.komponenta) $('#oKomponenta').value = obr.komponenta;
@@ -1122,6 +1146,10 @@ function start() {
   $('#knSpravochnik').onclick = () => $('#oknoSpravochnika').showModal();
   $('#knZakrytSpravochnik').onclick = () => $('#oknoSpravochnika').close();
   $('#nModelKartinka').onchange = e => LS.modelKartinki = e.target.value;
+  $('#nRisovalka').onchange = e => { const r = LS.risovalka; r.post = e.target.value; LS.risovalka = r;
+    const m = N.RISOVALKI[r.post]?.modeli || []; if (m.length) LS.modelKartinki = m[0];
+    pokazatRisovalku(); };
+  $('#nRisAdres').oninput = e => { const r = LS.risovalka; r.adres = e.target.value.trim(); LS.risovalka = r; };
   $('#nShablon').onchange = e => {
     const f = e.target.files[0]; if (!f) return;
     const fr = new FileReader();

@@ -180,17 +180,22 @@ export const POSTAVSHCHIKI = {
   openrouter: {
     imya: 'OpenRouter — много моделей одним ключом',
     gdeKlyuch: 'https://openrouter.ai/keys',
-    modeli: ['google/gemini-2.5-flash','openai/gpt-5-mini','anthropic/claude-haiku-4.5',
-             'qwen/qwen2.5-vl-72b-instruct','meta-llama/llama-4-maverick'],
+    modeli: ['openrouter/free','google/gemma-4-31b-it:free','minimax/minimax-m3:free',
+             'google/gemini-2.5-flash','qwen/qwen2.5-vl-72b-instruct','meta-llama/llama-4-maverick'],
     ceny: {},
     async spisokModeley(klyuch) {
       const r = await fetch('https://openrouter.ai/api/v1/models',
                             { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
-      return (j.data||[])
-        .filter(m => (m.architecture?.input_modalities||[]).includes('image'))
-        .map(m => m.id).sort();
+      const zryachie = (j.data||[]).filter(m => (m.architecture?.input_modalities||[]).includes('image'));
+      const darom = m => +((m.pricing||{}).prompt||1) === 0 && +((m.pricing||{}).completion||1) === 0;
+      const besplatnye = zryachie.filter(darom).map(m => m.id).sort();
+      const platnye = zryachie.filter(m => !darom(m)).map(m => m.id).sort();
+      const spisok = [...besplatnye, ...platnye];
+      spisok.besplatnyh = besplatnye.length;
+      spisok.besplatnye = besplatnye;
+      return spisok;
     },
     async razobrat(klyuch, model, foto, promt) {
       const soderzhanie = [{ type:'text', text: promt }];
@@ -207,6 +212,68 @@ export const POSTAVSHCHIKI = {
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
+  // Hugging Face — маршрутизатор OpenAI-совместимый и, что редкость, открытый
+  // для браузера: проверено запросом с чужого сайта, отвечает 200. Есть
+  // бесплатный месячный лимит.
+  huggingface: {
+    imya: 'Hugging Face — маршрутизатор',
+    gdeKlyuch: 'https://huggingface.co/settings/tokens',
+    modeli: ['Qwen/Qwen3-VL-235B-A22B-Instruct','Qwen/Qwen3-VL-30B-A3B-Instruct',
+             'meta-llama/Llama-4-Scout-17B-16E-Instruct','google/gemma-3-27b-it',
+             'Qwen/Qwen2.5-VL-72B-Instruct','CohereLabs/aya-vision-32b'],
+    ceny: {},
+    async spisokModeley(klyuch) {
+      const r = await fetch('https://router.huggingface.co/v1/models',
+                            { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
+      const zr = (j.data||[]).filter(m =>
+        /vision|-vl|vl-|llava|gemma-3|internvl|smolvlm|pixtral|llama-4|aya-vision/i.test(m.id));
+      return [...zr.map(m=>m.id).sort(), ...(j.data||[]).map(m=>m.id).filter(x=>!zr.some(z=>z.id===x)).sort()];
+    },
+    async razobrat(klyuch, model, foto, promt) {
+      const soderzhanie = [{ type:'text', text: promt }];
+      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+      const j = await poslat('https://router.huggingface.co/v1/chat/completions',
+        { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch },
+        { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
+          response_format:{ type:'json_object' } },
+        'Hugging Face');
+      const u = j.usage || {};
+      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Hugging Face'),
+               rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
+    },
+  },
+
+  // Together AI — тоже OpenAI-совместимый и тоже пускает браузер напрямую.
+  together: {
+    imya: 'Together AI',
+    gdeKlyuch: 'https://api.together.xyz/settings/api-keys',
+    modeli: ['meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8',
+             'meta-llama/Llama-Vision-Free','Qwen/Qwen2.5-VL-72B-Instruct'],
+    ceny: {},
+    async spisokModeley(klyuch) {
+      const r = await fetch('https://api.together.xyz/v1/models',
+                            { headers: klyuch ? { Authorization:'Bearer '+klyuch } : {} });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
+      const spisok = (Array.isArray(j) ? j : (j.data||[])).map(m => m.id || m.name).filter(Boolean);
+      const darom = spisok.filter(x => /free/i.test(x)).sort();
+      return [...darom, ...spisok.filter(x => !/free/i.test(x)).sort()];
+    },
+    async razobrat(klyuch, model, foto, promt) {
+      const soderzhanie = [{ type:'text', text: promt }];
+      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+      const j = await poslat('https://api.together.xyz/v1/chat/completions',
+        { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch },
+        { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2, max_tokens:4096 },
+        'Together');
+      const u = j.usage || {};
+      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Together'),
+               rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
+    },
+  },
+
   // NVIDIA NIM — каталог build.nvidia.com. Адрес OpenAI-совместимый, запросы
   // из браузера пропускает (CORS открыт), картинка идёт обычным image_url.
   // Список моделей отдаётся даже без ключа, поэтому его видно сразу.
@@ -341,7 +408,8 @@ export async function proverit(post, klyuch, model, adres) {
     return { ok: est, modeli: spisok, kartinki: spisok.kartinki || [],
       tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей' +
              (spisok.kartinki && spisok.kartinki.length ? ', из них ' + spisok.kartinki.length + ' рисуют картинки' : '') +
-             (spisok.zryachih ? ', из них ' + spisok.zryachih + ' видят картинки' : '') + '.' +
+             (spisok.zryachih ? ', из них ' + spisok.zryachih + ' видят картинки' : '') +
+             (spisok.besplatnyh ? ', БЕСПЛАТНЫХ зрячих ' + spisok.besplatnyh : '') + '.' +
              (est ? ' Выбранная модель на месте.' : ' Но модели «' + model + '» среди них нет — список обновлён, выбери из него.') };
   } catch (e) {
     let m = e.message || String(e);
@@ -372,6 +440,51 @@ export const CENY_KARTINOK = { 'gemini-3.1-flash-image':0.067, 'gemini-3.1-flash
  * Шаблон вёрстки сюда НЕ идёт: он нужен для листа разбора, а здесь важно,
  * чтобы в кадре был один предмет на белом и ни одной посторонней линии.
  */
+/**
+ * Чем рисовать картинки. У Google для картиночных моделей нужен биллинг —
+ * на бесплатном ключе они отвечают 429. Те же модели несёт OpenRouter, и
+ * платятся они его кредитами: биллинг Google не нужен вовсе.
+ */
+export const RISOVALKI = {
+  gemini:     { imya: 'Google напрямую (нужен биллинг Google)',
+                modeli: ['gemini-3.1-flash-image','gemini-3.1-flash-lite-image',
+                         'gemini-3-pro-image','gemini-2.5-flash-image'] },
+  openrouter: { imya: 'OpenRouter (биллинг Google не нужен)',
+                modeli: ['google/gemini-3.1-flash-image','google/gemini-3.1-flash-lite-image',
+                         'google/gemini-2.5-flash-image','google/gemini-3-pro-image',
+                         'openai/gpt-5-image-mini'] },
+  svoj:       { imya: 'Свой адрес (например бесплатный Cloudflare Worker)',
+                modeli: ['@cf/black-forest-labs/flux-1-schnell',
+                         '@cf/black-forest-labs/flux-2-klein-4b',
+                         '@cf/runwayml/stable-diffusion-v1-5-img2img',
+                         '@cf/stabilityai/stable-diffusion-xl-base-1.0',
+                         '@cf/bytedance/stable-diffusion-xl-lightning'] },
+};
+
+/** Нарисовать картинку через выбранного поставщика. */
+export async function narisovatCherez(post, klyuch, model, foto, promt, adres) {
+  if (post === 'gemini') return narisovatVid(klyuch, model, foto, promt);
+  if (post === 'openrouter' || post === 'svoj') {
+    const baza = post === 'svoj' ? bazaSvoego(adres) : 'https://openrouter.ai/api/v1';
+    const soderzhanie = [{ type:'text', text: promt }];
+    for (const f of (Array.isArray(foto) ? foto : [foto]))
+      soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+    const j = await poslat(baza + '/chat/completions',
+      { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch,
+        'HTTP-Referer':location.origin, 'X-Title':'klipsa-3d' },
+      { model, modalities:['image','text'], messages:[{ role:'user', content: soderzhanie }] },
+      post === 'svoj' ? 'Свой адрес' : 'OpenRouter');
+    const m = j?.choices?.[0]?.message || {};
+    const k = (m.images || [])[0];
+    const url = k?.image_url?.url || k?.url || (typeof k === 'string' ? k : null);
+    if (!url) throw new Error('модель не вернула картинку (ответ без images)');
+    const zpt = url.indexOf(',');
+    return { kartinka: url, mime: (url.slice(5, url.indexOf(';')) || 'image/png'),
+             b64: zpt > 0 ? url.slice(zpt+1) : '' };
+  }
+  throw new Error('неизвестная рисовалка: ' + post);
+}
+
 export async function narisovatVid(klyuch, model, foto, promt) {
   const j = await poslat(
     'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent',
