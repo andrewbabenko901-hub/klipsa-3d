@@ -66,6 +66,7 @@ export function maskaZalivka(px, W, H, porogBelogo = 232, razbros = 18) {
   }
   const m = new Uint8Array(N);
   for (let i = 0; i < N; i++) m[i] = fon[i] ? 0 : 1;
+  m.belo = belo;                       // пригодится, чтобы найти дырку внутри детали
   return m;
 }
 
@@ -82,7 +83,7 @@ export function maskaNasyshchennost(px, W, H, porog = 34) {
 
 // Градиентная маска (Собель + замыкание): выручает на пёстром фоне,
 // когда ни порог, ни заливка не берут.
-export function maskaGradient(px, W, H, porog = 42) {
+export function maskaGradient(px, W, H, porog = 42, sZalivkoyDyr = true) {
   const N = W * H, g = new Float32Array(N), m = new Uint8Array(N);
   const ya = i => px[i*4]*0.299 + px[i*4+1]*0.587 + px[i*4+2]*0.114;
   for (let y = 1; y < H-1; y++) for (let x = 1; x < W-1; x++) {
@@ -93,7 +94,7 @@ export function maskaGradient(px, W, H, porog = 42) {
   }
   for (let i = 0; i < N; i++) m[i] = g[i] > porog ? 1 : 0;
   const zamk = morfologiya(m, W, H, 3, 'zakrytie');
-  return zapolnitDyry(zamk, W, H);
+  return sZalivkoyDyr ? zapolnitDyry(zamk, W, H) : zamk;
 }
 
 export function obedinit(a, b) { const o = new Uint8Array(a.length); for (let i=0;i<a.length;i++) o[i] = (a[i]||b[i])?1:0; return o; }
@@ -513,6 +514,30 @@ export const METODY_MASKI = {
   gradient:     'По градиенту — пёстрый фон',
   kombi:        'Комбинированный — заливка ∪ насыщенность',
 };
+
+/**
+ * Маска ТОЛЬКО материала: без замкнутого фона внутри детали.
+ * Заливка от рамки по построению считает материалом всё, что не связано с
+ * краем кадра, — значит дырку в шляпке она заклеивает и найти её потом нельзя.
+ * Разница между этой маской и обычной и есть сквозное отверстие.
+ */
+export function maskaMateriala(px, W, H, metod, nastr = {}) {
+  const N = W * H;
+  const bezBelogo = (porog) => {
+    const z = maskaZalivka(px, W, H, porog);
+    const belo = z.belo, o = new Uint8Array(N);
+    for (let i = 0; i < N; i++) o[i] = belo[i] ? 0 : 1;
+    return o;
+  };
+  switch (metod) {
+    case 'otsu':           return maskaOtsu(px, W, H);
+    case 'nasyshchennost': return maskaNasyshchennost(px, W, H, nastr.porogNasyshch ?? 34);
+    case 'gradient':       return maskaGradient(px, W, H, nastr.porogGradienta ?? 42, false);
+    case 'kombi':          return obedinit(bezBelogo(nastr.porogBelogo ?? 232),
+                                           maskaNasyshchennost(px, W, H, nastr.porogNasyshch ?? 40));
+    default:               return bezBelogo(nastr.porogBelogo ?? 232);
+  }
+}
 
 export function postroitMasku(px, W, H, metod, nastr = {}) {
   switch (metod) {

@@ -7,7 +7,7 @@ import * as A from './algoritmy.js';
 import * as N from './nejro.js';
 import { promtKartinki } from './shema.js';
 import { svesti, svodka } from './konsensus.js';
-import { sobrat, podognat, summarno, elementDlya } from './sborka.js';
+import { sobrat, podognat, summarno, elementDlya, masshtab } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
 import { vStl, skachat } from './stl.js';
 import { PROBY } from './proby.js';
@@ -19,7 +19,7 @@ const $$ = s => [...document.querySelectorAll(s)];
 const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
-  rashod: [], granicy: null, nalozhenie: null,
+  rashod: [], granicy: null, nalozhenie: null, masshtab: null,
 };
 
 // ---------- хранилище ----------
@@ -174,11 +174,10 @@ function razborAlgoritmom() {
   let podpis = 'изломы профиля', uver = 0.6, iou = 0;
   try {
     const fot = O.maskaVyravnennaya(S.izmer);
-    const mm = +$('#pGolova').value || 16;
     const varianty = O.variantyRazbora(S.izmer);
     let luchshee = -1, luchshie = null, luchshieIou = 0;
     for (const v of varianty) {
-      const sb = sobrat(v.tela, S.izmer, mm);
+      const sb = sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm);
       const g = geomRecepta(sb.els).celoe;
       const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
       if (g && g.dispose) g.dispose();
@@ -205,8 +204,9 @@ function katalog() {
 function peresobrat() {
   if (!S.tela.length || !S.izmer) return;
   const kat = katalog();
-  const r = sobrat(S.tela, S.izmer, kat.shirinaMm || 16);
-  S.els = r.els; S.zam = r.zam.concat(podognat(S.els, kat, S.izmer));
+  S.masshtab = masshtab(kat, S.izmer, S.tela);
+  const r = sobrat(S.tela, S.izmer, S.masshtab.mm);
+  S.els = r.els; S.zam = r.zam.concat(podognat(S.els, kat, S.izmer, S.masshtab));
   S.granicy = O.granicyTel(S.izmer.polosy, S.tela.map(t => Math.max(0.02, +t.dolyaVysoty||0.1)));
   pererisovat(); pokazatRezultat(); $('#znKuskov').textContent = S.tela.length;
 }
@@ -255,8 +255,13 @@ function pokazatRezultat() {
 
   const vz = $('#vzyato'), dd = $('#dodumano'); vz.innerHTML = ''; dd.innerHTML = '';
   const kat = katalog();
-  if (kat.shirinaMm) vz.insertAdjacentHTML('beforeend', `<li>Габарит ${kat.shirinaMm} мм — каталог</li>`);
+  if (S.masshtab) {
+    const izvestno = /каталог|отверстия|штока/.test(S.masshtab.otkuda);
+    (izvestno ? vz : dd).insertAdjacentHTML('beforeend', `<li>${S.masshtab.otkuda}</li>`);
+  }
   if (kat.otverstie) vz.insertAdjacentHTML('beforeend', `<li>Отверстие Ø${kat.otverstie} мм — каталог</li>`);
+  if (S.izmer && S.izmer.otverstie) vz.insertAdjacentHTML('beforeend',
+    `<li>Дырка на снимке: ${Math.round(S.izmer.otverstie.dolyaD*100)}% ширины${S.izmer.otverstie.skvoznoe?', сквозная':''}</li>`);
   if (kat.dlinaShtoka) vz.insertAdjacentHTML('beforeend', `<li>Длина штока ${kat.dlinaShtoka} мм — каталог</li>`);
   if (S.izmer) {
     const nazvMetoda = A.METODY_MASKI[S.izmer.metod];
@@ -269,7 +274,7 @@ function pokazatRezultat() {
   if (!vz.children.length) vz.innerHTML = '<li class="tiho">пока ничего</li>';
   S.zam.forEach(z => dd.insertAdjacentHTML('beforeend', `<li>${z}</li>`));
   dd.insertAdjacentHTML('beforeend', '<li>Толщины не ниже печатного минимума</li>');
-  if (!kat.shirinaMm) dd.insertAdjacentHTML('beforeend', '<li>Габарит не задан — масштаб 16 мм</li>');
+
 
   $('#jsonVyhod').textContent = JSON.stringify(S.els.map(e => ({ kind:e.kind, params:e.params })), null, 1);
 }
@@ -300,6 +305,20 @@ function pokazatSravnenie() {
 }
 
 // ---------- редактор примитивов ----------
+// Что именно померено у этого куска. Видно, что каждый кусок считается сам по
+// себе, а не по общим коэффициентам от габарита.
+function zamerStroka(i) {
+  const e = S.els[i]; if (!e || !e.zamer) return '';
+  const M = e.zamer, p = v => Math.round(v*100) + '%';
+  const ch = ['замер: верх ' + p(M.verh) + ' · низ ' + p(M.niz) +
+              ' · шире всего ' + p(M.max) + ' · уже всего ' + p(M.min)];
+  if (M.rebristo) ch.push('рябь: гребни ' + p(M.grebni) + ', впадины ' + p(M.vpadina) +
+                          ', гребней ' + M.grebnej);
+  if (M.prosvet > 0.015) ch.push('просвет ' + p(M.prosvet) + ' в ' + M.kuskov + ' кусках');
+  if (M.otverstie) ch.push('дырка ' + p(M.otverstie.dolyaD));
+  return ch.join(' · ');
+}
+
 function pokazatKuski() {
   const k = $('#kuski');
   $('#znKuskov').textContent = S.tela.length;
@@ -323,7 +342,8 @@ function pokazatKuski() {
         <div><label>Доля ширины</label><input type="number" data-p="dolyaShiriny" step="0.01" min="0" max="1" value="${t.dolyaShiriny}"></div>
         <div><label>Зубцов</label><input type="number" data-p="zubcov" min="0" max="20" value="${t.zubcov||0}"></div>
       </div>
-      <div class="podskazka">→ ${elementDlya(t.tip, t.sechenie)}${t.istochnik?' · '+t.istochnik:''}</div>`;
+      <div class="podskazka">→ ${elementDlya(t.tip, t.sechenie)}${t.istochnik?' · '+t.istochnik:''}</div>
+      <div class="podskazka zamer">${zamerStroka(i)}</div>`;
     d.addEventListener('input', ev => {
       const p = ev.target.dataset.p; if (!p) return;
       t[p] = ev.target.type === 'number' ? +ev.target.value : ev.target.value;
@@ -645,11 +665,10 @@ function pokazatSpravochnik() {
 function ocenitVariantySiluetom(varianty) {
   if (!S.izmer) return;
   let fot; try { fot = O.maskaVyravnennaya(S.izmer); } catch { return; }
-  const mm = +$('#pGolova').value || 16;
   for (const v of varianty) {
     if (!v.tela || !v.tela.length) continue;
     try {
-      const g = geomRecepta(sobrat(v.tela, S.izmer, mm).els).celoe;
+      const g = geomRecepta(sobrat(v.tela, S.izmer, masshtab(katalog(), S.izmer, v.tela).mm).els).celoe;
       const sv = SIL.sravnit(fot, SIL.siluetGeometrii(g, 180), 140);
       if (g && g.dispose) g.dispose();
       if (sv) { v.iou = sv.iou; v.ves = (v.ves || 1) * (0.6 + 0.8*sv.iou); }
@@ -805,8 +824,13 @@ function start() {
     S.tela.push({ nomer:S.tela.length+1, tip:'shejka', sechenie:'krugloe', rebra:0, zubcov:0,
       napravlenieZubcov:'net', dolyaVysoty:0.1, dolyaShiriny:0.5, suzhaetsya:'net',
       opisanie:'новый кусок', uverennost:0.5 });
-    if (!S.izmer) S.izmer = { os:'вертикально', cvet:[74,132,92], vysotaKShirine:1.4,
-      zapolnennost:.5, polosy:Array.from({length:40},(_,i)=>1-i*0.02) };
+    if (!S.izmer) {
+      // без снимка мерить нечего: профиль ставится ровным, и об этом честно
+      // сказано — раньше здесь подставлялся конус, и деталь «строилась» из него
+      S.izmer = { os:'вертикально', cvet:[74,132,92], vysotaKShirine:1.4,
+        zapolnennost:.5, polosy:Array.from({length:40},()=>1), bezSnimka:true };
+      skazatOshibku('Снимка нет — профиль ровный, все размеры придётся вписать руками.', true);
+    }
     pokazatKuski(); peresobrat();
   };
 

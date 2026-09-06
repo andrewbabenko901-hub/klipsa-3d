@@ -1,6 +1,6 @@
 // Примитивы из разбора + обмер силуэта -> рецепт из элементов ClipGen.
 // Нейронка даёт структуру, обмер даёт числа, здесь они соединяются.
-import { granicyTel } from './obmer.js';
+import { granicyTel, meriTelo } from './obmer.js';
 import { ELEMENTY, vysota } from './elementy.js';
 
 // примитив -> элемент конструктора. Ключ "тип|сечение", запасной "тип|*".
@@ -32,114 +32,229 @@ export function elementDlya(tip, sech) {
   return KARTA[tip + '|' + sech] || KARTA[tip + '|*'] || 'stem_plain';
 }
 
+/**
+ * Масштаб: миллиметры берутся от того, что известно, а не «16 мм всем».
+ * Раньше при пустом поле габарита каждая деталь строилась шириной 16 мм —
+ * от этого разные клипсы выходили одного размера.
+ */
+export function masshtab(katalog, izmer, tela) {
+  if (katalog.shirinaMm > 0)
+    return { mm: +katalog.shirinaMm, otkuda: 'габарит ' + katalog.shirinaMm + ' мм — каталог' };
+
+  if (katalog.otverstie > 0 && izmer && izmer.otverstie && izmer.otverstie.dolyaD > 0.05)
+    return { mm: +(katalog.otverstie / izmer.otverstie.dolyaD).toFixed(2),
+             otkuda: 'масштаб от отверстия Ø' + katalog.otverstie +
+                     ' мм: на снимке оно ' + Math.round(izmer.otverstie.dolyaD*100) + '% ширины' };
+
+  if (katalog.dlinaShtoka > 0 && izmer && izmer.vysotaKShirine > 0 && tela && tela.length) {
+    const nizDolya = tela.reduce((s2, t) =>
+      s2 + (ELEMENTY[elementDlya(t.tip, t.sechenie)]?.zona === 'ГОЛОВА'
+            ? 0 : Math.max(0.02, +t.dolyaVysoty || 0.1)), 0);
+    const vsego = tela.reduce((s2, t) => s2 + Math.max(0.02, +t.dolyaVysoty || 0.1), 0) || 1;
+    const dolya = nizDolya / vsego;
+    if (dolya > 0.08)
+      return { mm: +(katalog.dlinaShtoka / (dolya * izmer.vysotaKShirine)).toFixed(2),
+               otkuda: 'масштаб от длины штока ' + katalog.dlinaShtoka +
+                       ' мм: на снимке низ занимает ' + Math.round(dolya*100) + '% высоты' };
+  }
+  return { mm: 16, otkuda: 'ни одного размера не задано — принят габарит 16 мм' };
+}
+
+/**
+ * Примитивы + обмер -> рецепт в миллиметрах.
+ *
+ * Главное правило: каждое число, которое ВИДНО на силуэте, берётся из полос
+ * этого куска — верх, низ, самое широкое, самое узкое, гребни и впадины ряби,
+ * просветы, отверстие. Никаких «сердечник = 0.55 диаметра».
+ * Всё, чего на одном виде не видно (глубина прямоугольной головы, толщина
+ * стенки, толщина ребра), помечается как принятое и уходит в «Додумано».
+ */
 export function sobrat(tela, izmer, razmerMm) {
-  const polosy = izmer.polosy;
   const shirMm = Math.max(1, +razmerMm || 16);
-  const vysMm  = shirMm * izmer.vysotaKShirine;
+  const vysMm  = shirMm * (izmer.vysotaKShirine || 1);
   const doli = tela.map(t => Math.max(0.02, +t.dolyaVysoty || 0.1));
-  const gran = granicyTel(polosy, doli);
-  const els = [], zam = [];
+  const gran = granicyTel(izmer.polosy, doli);
+  const els = [], zam = [], prinyato = [];
+  const dopusk = tekst => { if (!prinyato.includes(tekst)) prinyato.push(tekst); };
 
   tela.forEach((t, i) => {
     const [a, b] = gran[i];
-    const kus = polosy.slice(a, b);
-    const verh = kus[0] ?? 0.5, niz = kus[kus.length-1] ?? 0.5;
-    let mx = Math.max(...kus, 0.05);
-    if (t.dolyaShiriny) mx = Math.min(mx, Math.max(+t.dolyaShiriny, 0.05) * 1.15);
-    const D = mx * shirMm, Dv = verh * shirMm, Dn = niz * shirMm;
-    const L = Math.max(0.02, (b - a) / polosy.length) * vysMm;
-    const k = elementDlya(t.tip, t.sechenie);
-    const reb = Math.max(0, t.rebra | 0), zub = Math.max(0, t.zubcov | 0);
-    // зазор между лапками не выдумываем: он померен по просветам в полосах
-    const nog = Math.max(2, reb || (t.kuskov | 0) || 2);
-    const zaz = t.zazor > 0.02 ? (D * t.zazor) / nog : 0;
+    const M = meriTelo(izmer, a, b);
+
+    // Ширину берём с профиля, а не с «доли ширины» из ответа нейронки:
+    // раньше её потолок резал замер верха и низа куска, и воротник под шляпкой
+    // становился уже, чем он есть. Доля нейронки годится только как проверка.
+    const mm = v => Math.round(v * shirMm * 100) / 100;
+    if (t.dolyaShiriny && M.max > +t.dolyaShiriny * 1.45)
+      zam.push('тело ' + (i+1) + ': на снимке шире, чем сказал источник (' +
+               Math.round(M.max*100) + '% против ' + Math.round(t.dolyaShiriny*100) + '%) — взят замер');
+
+    const D    = mm(M.max);        // самое широкое место куска
+    const Dv   = mm(M.verh);       // ширина вверху куска
+    const Dn   = mm(M.niz);        // ширина внизу куска
+    const Dsr  = mm(M.sredn);      // средняя по куску
+    const Dmin = mm(M.min);        // самое узкое место
+    const Dgr  = mm(M.grebni);     // средний гребень ряби (лепесток ёлочки, фланец)
+    const Dvp  = mm(M.vpadina);    // средняя впадина ряби (ядро ёлочки, талия)
+    const L    = Math.max(0.02, M.dolyaVysoty) * vysMm;
+    const dyra = M.otverstie ? mm(M.otverstie.dolyaD) : 0;
+    const zazM = M.prosvet > 0.015 ? mm(M.prosvet) : 0;   // вся пустота поперёк
+    const nog  = Math.max(2, (t.rebra | 0) || M.kuskov || 2);
+    const zaz  = zazM ? Math.max(0.3, zazM / nog) : 0;    // на один просвет
+
+    let k = elementDlya(t.tip, t.sechenie);
+    // если на снимке в этом куске видна дырка, а выбранный элемент отверстия
+    // не умеет — берём тот, который умеет. Это замер, а не догадка.
+    if (dyra >= 0.08 * shirMm) {
+      const sOtv = { head_disc: 'washer_flat', head_dome: 'washer_flat',
+                     head_rect: 'plate_hole', head_screw: 'washer_flat' }[k];
+      if (sOtv) { k = sOtv; zam.push('тело ' + (i+1) + ': на снимке видна дырка Ø' +
+        dyra.toFixed(1) + ' мм — взят ' + sOtv + ' вместо ' + elementDlya(t.tip, t.sechenie)); }
+    }
+    const zub = Math.max(0, t.zubcov | 0);
+    const nomer = 'тело ' + (i+1);
     let p;
 
     switch (k) {
       case 'head_disc': case 'head_dome':
         p = { d: ok(D,'d'), t: ok(L,'t') }; break;
+
       case 'washer_flat':
-        p = { d: ok(D,'d'), dBore: ok(D*0.35,'dBore'), t: ok(L,'t') }; break;
+        if (!dyra) dopusk(nomer + ': отверстия на снимке не видно — принято 0.35 диаметра');
+        p = { d: ok(D,'d'), dBore: ok(dyra || D*0.35,'dBore'), t: ok(L,'t') }; break;
+
       case 'head_rect':
-        p = { w: ok(D*0.5,'w'), l: ok(D,'l'), t: ok(L,'t') }; break;
+        dopusk(nomer + ': глубина прямоугольной головы на одном виде не видна — принята 0.55 длины');
+        p = { w: ok(D*0.55,'w'), l: ok(D,'l'), t: ok(L,'t') }; break;
+
       case 'head_screw':
         p = { d: ok(D,'d'), t: ok(L,'t'), drive:'torx' }; break;
+
       case 'plate_hole':
-        p = { w: ok(D*0.7,'w'), l: ok(D,'l'), t: ok(L,'t'), okno: ok(D*0.3,'okno') }; break;
+        if (!dyra) dopusk(nomer + ': окна на снимке не видно — принято 0.3 длины');
+        dopusk(nomer + ': ширина площадки на одном виде не видна — принята 0.7 длины');
+        p = { w: ok(D*0.7,'w'), l: ok(D,'l'), t: ok(L,'t'), okno: ok(dyra || D*0.3,'okno') }; break;
+
       case 'nut_hex':
-        p = { s: ok(D,'s'), dBore: ok(D*0.55,'dBore'), h: ok(L,'h') }; break;
+        if (!dyra) dopusk(nomer + ': отверстия гайки не видно — принято 0.55 под ключ');
+        p = { s: ok(D,'s'), dBore: ok(dyra || D*0.55,'dBore'), h: ok(L,'h') }; break;
+
       case 'stem_plain':
-        p = { d: ok(D,'d'), len: ok(L,'len') }; break;
+        p = { d: ok(Dsr,'d'), len: ok(L,'len') }; break;
+
       case 'stem_split':
+        if (!zazM) dopusk(nomer + ': просвета в шейке не видно — прорезь принята 0.6 диаметра');
+        dopusk(nomer + ': толщина отгиба на силуэте не видна — принята 0.25 диаметра');
         p = { d: ok(D,'d'), len: ok(L,'len'), legs: nog,
-              span: ok(zaz || D*0.6,'span'), wing: ok(D*0.25,'wing') }; break;
-      case 'cone_ring': {
-        let dv = Math.min(Dv, Dn), dn = Math.max(Dv, Dn);
-        if (Dv > Dn) { const x = dv; dv = dn; dn = x; }
-        p = { d: ok(dv,'d'), dLow: ok(dn,'dLow'), h: ok(L,'h'), t: ok(Math.max(1, L*0.45),'t') };
-        break; }
+              span: ok(zazM || D*0.6,'span'), wing: ok(D*0.25,'wing') }; break;
+
+      case 'cone_ring':
+        // d — ширина вверху куска, dLow — внизу, ровно как на снимке.
+        // Тут была ошибка: min/max меняли их местами и воротник переворачивался.
+        dopusk(nomer + ': толщина воротника на силуэте не видна — принята 0.45 высоты');
+        p = { d: ok(Dv,'d'), dLow: ok(Dn,'dLow'), h: ok(L,'h'), t: ok(Math.max(1, L*0.45),'t') };
+        break;
+
       case 'skirt':
+        dopusk(nomer + ': толщина юбки на силуэте не видна — принята 0.4 высоты');
         p = { d: ok(D,'d'), t: ok(Math.max(0.9, L*0.4),'t'), h: ok(L,'h') }; break;
+
       case 'spool':
-        p = { d: ok(D,'d'), dLow: ok(D*0.9,'dLow'), dCore: ok(D*0.45,'dCore'),
+        if (!M.rebristo) dopusk(nomer + ': талия катушки не читается — принята 0.45 диаметра');
+        dopusk(nomer + ': толщина фланца принята 0.3 высоты');
+        p = { d: ok(Dgr,'d'), dLow: ok(Dn,'dLow'),
+              dCore: ok(M.rebristo ? Dvp : D*0.45,'dCore'),
               t: ok(L*0.3,'t'), h: ok(L,'h') }; break;
+
       case 'bushing':
-        p = { d: ok(D,'d'), dLow: ok(Dn,'dLow'), len: ok(L,'len'), wall: ok(D*0.15,'wall') }; break;
+        dopusk(nomer + ': толщина стенки втулки на силуэте не видна — принята 0.15 диаметра');
+        p = { d: ok(Dv,'d'), dLow: ok(Dn,'dLow'), len: ok(L,'len'), wall: ok(D*0.15,'wall') }; break;
+
       case 'thread_out':
+        dopusk(nomer + ': шаг резьбы на силуэте не меряется — принят 1.25 мм');
         p = { d: ok(D,'d'), len: ok(L,'len'), pitch: 1.25 }; break;
+
       case 'stem_fin': {
-        const yadro = D * 0.55;
-        p = { d: ok(yadro,'d'), len: ok(L,'len'), barbD: ok(D,'barbD'), n: Math.max(3, zub||6) };
-        if (yadro < 4.6) zam.push('ёлочка: ядро ' + yadro.toFixed(1) + ' мм, лепестки могут слиться');
+        // ядро и лепестки берутся из ряби профиля, а не из доли диаметра
+        const yadro = M.rebristo ? Dvp : D*0.55;
+        const lepestok = M.rebristo ? Dgr : D;
+        if (!M.rebristo) dopusk(nomer + ': зубцы на профиле не разделились — ядро принято 0.55 лепестка');
+        // число лепестков считается по гребням профиля этого куска
+        p = { d: ok(yadro,'d'), len: ok(L,'len'), barbD: ok(lepestok,'barbD'),
+              n: Math.max(3, M.grebnej >= 3 ? M.grebnej : (zub || 6)) };
+        if (yadro < 4.6) zam.push(nomer + ': ёлочка, ядро ' + yadro.toFixed(1) + ' мм — лепестки могут слиться');
         break; }
+
       case 'cone_ribs':
-        p = { d: ok(Dv,'d'), dLow: Math.max(0.4, +(Dn*0.15).toFixed(2)), len: ok(L,'len'),
-              rebra: Math.max(3, reb||4), t: ok(D*0.24,'t'),
+        dopusk(nomer + ': толщина рёбер и доля ядра на одном виде не видны — приняты 0.24 и 0.68');
+        p = { d: ok(Dv,'d'), dLow: ok(Math.max(0.4, Dn),'dLow'), len: ok(L,'len'),
+              rebra: Math.max(3, (t.rebra|0) || 4), t: ok(D*0.24,'t'),
               core: t.sechenie === 'srezannoe_ploskostyami' ? 0.88
                   : t.sechenie === 'mnogogrannik' ? 0.95 : 0.68,
               plecho: 0.10, poyas: 0.83 };
         break;
+
       case 'cone_split':
-        p = { d: ok(Dv,'d'), dLow: ok(Math.max(1.5, Dn*0.3),'dLow'), len: ok(L,'len'),
-              bore: ok(D*0.35,'bore'), legs: nog,
+        if (!dyra) dopusk(nomer + ': отверстия в разрезном конусе не видно — принято 0.35 диаметра');
+        p = { d: ok(Dv,'d'), dLow: ok(Math.max(0.8, Dn),'dLow'), len: ok(L,'len'),
+              bore: ok(dyra || D*0.35,'bore'), legs: nog,
               gap: ok(zaz || D*0.12,'gap'), nasechki: 0 }; break;
+
       case 'tip_cone':
-        p = { d: ok(D,'d'), len: ok(L,'len') }; break;
+        p = { d: ok(Dv,'d'), len: ok(L,'len') }; break;
+
       case 'blade_legs':
+        dopusk(nomer + ': толщина лезвия на одном виде не видна — принята 0.2 ширины');
         p = { w: ok(D,'w'), t: ok(D*0.2,'t'), len: ok(L,'len'), legs: nog,
-              wing: ok(D*0.2,'wing'), core: ok(Math.max(1.2, D - (zaz||D*0.65)),'core') }; break;
+              wing: ok(D*0.2,'wing'),
+              core: ok(Math.max(1.2, zazM ? D - zazM : D*0.35),'core') }; break;
+
       case 'wings_up':
+        dopusk(nomer + ': сечение крыла на одном виде не видно — принято 0.4 × 0.15 размаха');
         p = { w: ok(D*0.4,'w'), t: ok(D*0.15,'t'), h: ok(L,'h'),
-              spread: ok(D,'spread'), legs: Math.max(2, reb||2) }; break;
+              spread: ok(D,'spread'), legs: nog }; break;
+
       case 'stem_cage':
-        p = { d: ok(D,'d'), len: ok(L,'len'), legs: Math.max(2, reb||4),
-              gap: ok(D*0.12,'gap'), okno: ok(L*0.4,'okno'), wing: ok(D*0.15,'wing') }; break;
+        dopusk(nomer + ': окно и отгиб клетки на силуэте не видны');
+        p = { d: ok(D,'d'), len: ok(L,'len'), legs: Math.max(2, (t.rebra|0) || 4),
+              gap: ok(zaz || D*0.12,'gap'), okno: ok(L*0.4,'okno'), wing: ok(D*0.15,'wing') }; break;
+
       case 'legs_u':
+        dopusk(nomer + ': сечение скобы на одном виде не видно — принято 0.35 × 0.15 размаха');
         p = { w: ok(D*0.35,'w'), t: ok(D*0.15,'t'), len: ok(L,'len'), span: ok(D,'span') }; break;
+
       case 'hvostovik': {
-        const uzko = Math.min(Dv, Dn), shiroko = Math.max(Dv, Dn, D);
-        p = { d: ok(uzko*0.9,'d'), w: ok(uzko*0.55,'w'), t: ok(uzko*0.45,'t'), len: ok(L,'len'),
-              spread: ok(shiroko,'spread'), foot: ok(uzko*0.5,'foot'), legs: nog };
+        // шейка — самое узкое место куска, размах — самое широкое: и то и другое замер
+        dopusk(nomer + ': сечение лапки и пятка на одном виде не видны');
+        p = { d: ok(Dmin,'d'), w: ok(Dmin*0.6,'w'), t: ok(Dmin*0.45,'t'), len: ok(L,'len'),
+              spread: ok(D,'spread'), foot: ok(Dmin*0.5,'foot'), legs: nog };
         break; }
+
       case 'ring_lug':
-        p = { d: ok(D,'d'), dBore: ok(D*0.5,'dBore'), t: ok(L,'t'),
+        if (!dyra) dopusk(nomer + ': отверстия проушины не видно — принято 0.5 диаметра');
+        p = { d: ok(D,'d'), dBore: ok(dyra || D*0.5,'dBore'), t: ok(L,'t'),
               w: ok(D*0.6,'w'), len: ok(L*2,'len') }; break;
+
       default:
         p = { d: ok(D,'d'), len: ok(L,'len') };
     }
-    els.push({ kind: k, params: p, primitiv: t });
+
+    els.push({ kind: k, params: p, primitiv: t, zamer: M });
     if ((t.uverennost ?? 1) < 0.6)
-      zam.push('тело ' + (i+1) + ' (' + t.tip + '/' + t.sechenie + '): низкая уверенность');
+      zam.push(nomer + ' (' + t.tip + '/' + t.sechenie + '): низкая уверенность');
   });
-  return { els, zam };
+
+  return { els, zam: zam.concat(prinyato), prinyato };
 }
 
 // Подгонка длины низа под опубликованную длину штока.
 // Ширину трогать не надо: sobrat уже поставил самое широкое место равным
 // заданному габариту, второй пересчёт только всё ломал.
-export function podognat(els, katalog, izmer) {
+export function podognat(els, katalog, izmer, mash) {
   const zam = [];
-  if (katalog.dlinaShtoka > 0) {
+  // если масштаб УЖЕ взят от длины штока, второй раз её применять нельзя
+  const shtokUzhe = mash && /штока/.test(mash.otkuda || '');
+  if (katalog.dlinaShtoka > 0 && !shtokUzhe) {
     const nizh = els.filter(e => ELEMENTY[e.kind]?.zona !== 'ГОЛОВА');
     const est = nizh.reduce((s, e) => s + vysota(e.kind, e.params), 0);
     if (est > 0.5) {

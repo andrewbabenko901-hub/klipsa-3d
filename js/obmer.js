@@ -56,7 +56,13 @@ export function obmerit(img, opt = {}) {
   if (n.chistka === 'otkrytie' || n.chistka === 'oba') m = A.morfologiya(m, W, H, n.radius, 'otkrytie');
   if (n.chistka === 'zakrytie' || n.chistka === 'oba') m = A.morfologiya(m, W, H, n.radius, 'zakrytie');
 
-  const mSyroj = m;                          // до заполнения дыр — по ней ищем отверстие
+  // маска только материала — по ней видно сквозное отверстие
+  let mSyroj = A.maskaMateriala(px, W, H, n.maska, n);
+  if (n.bezPometok) for (let i = 0; i < N; i++) {
+    const r = px[i*4], g = px[i*4+1], b = px[i*4+2];
+    if (r > 130 && r > g*1.8 && r > b*1.8) mSyroj[i] = 0;
+  }
+  if (n.chistka === 'otkrytie' || n.chistka === 'oba') mSyroj = A.morfologiya(mSyroj, W, H, n.radius, 'otkrytie');
   const mZal = A.zapolnitDyry(m, W, H);
   if (n.dyry) m = mZal;
 
@@ -151,6 +157,58 @@ function najtiOtverstie(mSyroj, metka, nom, W, H, ramka, vert, perevernut) {
 export function razborAlgoritmom(izmer, chuvstvitelnost = 0.5) {
   return A.narezatTela(izmer.polosy, chuvstvitelnost,
     izmer.runs ? { zapoln: izmer.zapoln, runs: izmer.runs, telo: izmer.polosyTelo } : null);
+}
+
+/**
+ * Замер одного куска по его собственным полосам.
+ * Раньше сборка знала про кусок только «самое широкое место» и дальше всё
+ * внутреннее считала коэффициентами: сердечник 0.55 диаметра, отверстие 0.35,
+ * низ конуса 0.15. От этого две разные клипсы с одинаковым габаритом выходили
+ * одинаковыми внутри. Здесь всё, что вообще видно на силуэте, берётся с него.
+ *
+ * Все размеры — доли от самого широкого места детали.
+ */
+export function meriTelo(izmer, a, b) {
+  const P = izmer.polosy || [], N = P.length || 1;
+  a = Math.max(0, Math.min(N-1, a|0));
+  b = Math.max(a+1, Math.min(N, b|0));
+  const kus = P.slice(a, b);
+  const telo = (izmer.polosyTelo || P).slice(a, b);
+  const zap  = (izmer.zapoln || []).slice(a, b);
+  const runs = (izmer.runs || []).slice(a, b);
+  const n = kus.length || 1;
+
+  const verh = kus[0] ?? 0.5, niz = kus[n-1] ?? 0.5;
+  const max = Math.max(0.02, Math.max(...kus));
+  const min = Math.max(0.02, Math.min(...kus));   // не Math.min(...kus, 0.02): так было бы всегда 0.02
+  const sredn = kus.reduce((x,y)=>x+y, 0) / n;
+  const razmah = max - min;
+
+  // локальные вершины и впадины: у ёлочки это диаметр лепестка и диаметр
+  // ядра, у катушки — фланец и талия. Это настоящие размеры, а не доли.
+  const verhi = [], vpadiny = [];   // гребни и впадины ряби — зубцы, фланцы, талия
+  for (let i = 1; i < n-1; i++) {
+    if (kus[i] >= kus[i-1] && kus[i] >= kus[i+1] && kus[i] > min + razmah*0.2) verhi.push(kus[i]);
+    if (kus[i] <= kus[i-1] && kus[i] <= kus[i+1] && kus[i] < max - razmah*0.2) vpadiny.push(kus[i]);
+  }
+  const sr = a2 => a2.reduce((x,y)=>x+y,0) / a2.length;
+  const grebni  = verhi.length   >= 2 ? sr(verhi)   : max;
+  const vpadina = vpadiny.length >= 2 ? sr(vpadiny) : min;
+
+  const zapoln = zap.length ? (A.mediana(zap.filter(v => v > 0)) || 1) : 1;
+  const kuskov = runs.length ? (Math.round(A.mediana(runs.map(r => r.length))) || 1) : 1;
+  const material = telo.reduce((x,y)=>x+y, 0) / n;          // ширина без просветов
+  const prosvet = Math.max(0, sredn - material);            // сколько всего пустого поперёк
+
+  let otverstie = null;
+  const o = izmer.otverstie;
+  if (o && o.poVysote >= a/N - 0.03 && o.poVysote <= b/N + 0.03) otverstie = o;
+
+  return { a, b, polos: n, dolyaVysoty: n/N,
+           verh, niz, max, min, sredn, grebni, vpadina,
+           zapoln, kuskov, material, prosvet, otverstie,
+           grebnej: verhi.length, vpadin: vpadiny.length,
+           rebristo: verhi.length >= 2 && vpadiny.length >= 2 };
 }
 
 // Все варианты нарезки — чтобы выбрать число тел по совпадению силуэта.
