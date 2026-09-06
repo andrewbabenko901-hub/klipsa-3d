@@ -115,6 +115,27 @@ ${kuda}
 ${podskazka ? '\nПодсказка от заказчика: ' + podskazka : ''}`;
 }
 
+/**
+ * Короткий промпт по-английски для чистых рисовалок (flux, stable diffusion).
+ *
+ * Им нельзя давать наш длинный русский текст: у них жёсткий лимит на длину
+ * подсказки, русского они почти не понимают, а их фильтр безопасности на такой
+ * текст отвечает «8007: Input prompt contains NSFW content» — и рисование
+ * падает на ровном месте. Нанобанане и другим чат-моделям по-прежнему уходит
+ * подробный русский промпт: они его понимают и слушаются.
+ */
+export function promtVidaKratko(rol) {
+  const obshcheye = 'plain white background, part centered, entire part visible with margins, ' +
+                    'square 1:1 frame, orthographic projection, no perspective, ' +
+                    'no text, no labels, no arrows, no dimension lines, no shadow';
+  const rakurs = {
+    speredi: 'straight side elevation view, part axis vertical, wide end up',
+    sboku:   'straight side elevation view rotated 90 degrees around its vertical axis, axis vertical, wide end up',
+    sverhu:  'viewed exactly from above along its axis, showing the outline of its cross-section',
+  }[rol] || 'straight side elevation view';
+  return `product photo of a single plastic automotive fastener clip, ${rakurs}, ${obshcheye}`;
+}
+
 export function promtKartinki(tela) {
   const spisok = tela.map((t, i) => (i+1) + ') ' + (t.opisanie || t.tip)).join(', ');
   return `САМОЕ ГЛАВНОЕ: на первом изображении нарисована СОВСЕМ ДРУГАЯ, ПОСТОРОННЯЯ

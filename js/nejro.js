@@ -86,15 +86,50 @@ async function poslat(url, zagolovki, telo, imya) {
   return j;
 }
 
+/**
+ * Достать JSON из ответа модели.
+ *
+ * Мелкие зрячие модели (llama-4-scout и подобные) любят сперва рассказать
+ * словами, потом выдать JSON, а иногда обрамить его забором ```json. Бывает и
+ * фигурная скобка внутри самой прозы — тогда «от первой { до последней }» даёт
+ * мусор. Поэтому ищем настоящие сбалансированные объекты: идём по каждой
+ * открывающей скобке, считаем вложенность с учётом строк и экранирования, и
+ * берём самый крупный кусок, который действительно разобрался.
+ */
 function razobratJson(tekst, imya) {
   if (!tekst) throw new Error(imya + ': пустой ответ');
-  const t = tekst.trim().replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
-  try { return JSON.parse(t); }
-  catch {
-    const a = t.indexOf('{'), b = t.lastIndexOf('}');
-    if (a >= 0 && b > a) return JSON.parse(t.slice(a, b+1));
-    throw new Error(imya + ': ответ не похож на JSON');
+  const t = String(tekst).trim();
+
+  const poprobovat = (s) => { try { return JSON.parse(s); } catch { return undefined; } };
+
+  const celikom = poprobovat(t.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim());
+  if (celikom !== undefined) return celikom;
+
+  // заборы ```json ... ``` в любом месте текста
+  for (const m of [...t.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].reverse()) {
+    const j = poprobovat(m[1].trim());
+    if (j !== undefined) return j;
   }
+
+  // сбалансированные объекты
+  const kandidaty = [];
+  for (let i = 0; i < t.length; i++) {
+    if (t[i] !== '{') continue;
+    let gl = 0, vStroke = false, ekran = false;
+    for (let k = i; k < t.length; k++) {
+      const c = t[k];
+      if (ekran) { ekran = false; continue; }
+      if (c === '\\') { ekran = true; continue; }
+      if (c === '"') { vStroke = !vStroke; continue; }
+      if (vStroke) continue;
+      if (c === '{') gl++;
+      else if (c === '}') { gl--; if (!gl) { kandidaty.push(t.slice(i, k+1)); break; } }
+    }
+  }
+  kandidaty.sort((a, b) => b.length - a.length);
+  for (const k of kandidaty) { const j = poprobovat(k); if (j !== undefined) return j; }
+
+  throw new Error(imya + ': ответ не похож на JSON. Начало ответа: ' + t.slice(0, 160));
 }
 
 // ---------- поставщики ----------
@@ -505,11 +540,16 @@ export const RISOVALKI = {
 };
 
 /** Нарисовать картинку через выбранного поставщика. */
-export async function narisovatCherez(post, klyuch, model, foto, promt, adres) {
+export async function narisovatCherez(post, klyuch, model, foto, promt, adres, promtKratkij) {
   if (post === 'gemini') return narisovatVid(klyuch, model, foto, promt);
   if (post === 'openrouter' || post === 'svoj') {
     const baza = post === 'svoj' ? bazaSvoego(adres) : 'https://openrouter.ai/api/v1';
-    const soderzhanie = [{ type:'text', text: promt }];
+    // Чистые рисовалки (flux, stable diffusion) картинку не видят и длинный
+    // русский текст не переваривают — их фильтр отвечает «8007: NSFW content».
+    // Им уходит короткий английский промпт; чат-моделям — подробный русский.
+    const chistayaRisovalka = /flux|stable-diffusion|sdxl|dreamshaper|lightning|sana|shuttle/i.test(model);
+    const tekst = (chistayaRisovalka && promtKratkij) ? promtKratkij : promt;
+    const soderzhanie = [{ type:'text', text: tekst }];
     for (const f of (Array.isArray(foto) ? foto : [foto]))
       soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
     // HTTP-Referer и X-Title — фирменные заголовки OpenRouter (для статистики).

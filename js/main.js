@@ -5,7 +5,7 @@ import { slozhit } from './geom.js';
 import * as O from './obmer.js';
 import * as A from './algoritmy.js';
 import * as N from './nejro.js';
-import { promtKartinki, promtVida } from './shema.js';
+import { promtKartinki, promtVida, promtVidaKratko } from './shema.js';
 import { svesti, svodka } from './konsensus.js';
 import { sobrat, podognat, summarno, elementDlya, masshtab } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
@@ -340,7 +340,8 @@ async function dorisovatVidy() {
   };
   const narisovat = async rol => {
     const r = await N.narisovatCherez(ris.post, gk, model, fotoFront,
-                                      promtVida(rol, podskazka), ris.adres);
+                                      promtVida(rol, podskazka), ris.adres,
+                                      promtVidaKratko(rol));
     S.rashod.push({ istochnik: 'вид ' + rol, post: ris.post, model, kartinok: 1 });
     return r;
   };
