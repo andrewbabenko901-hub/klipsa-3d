@@ -600,8 +600,14 @@ export function podskazatAdresNvidia(adresSvoego) {
 
 // Прямой адрес NVIDIA из браузера недостижим — проверено дважды. Отличаем его,
 // чтобы не тратить 150 секунд на заведомо мёртвый запрос.
-export const pryamoNaNvidia = (adres) =>
-  /(^|\.)(integrate|ai)\.api\.nvidia\.com/i.test(String(adres || ''));
+export const pryamoNaNvidia = (adres) => {
+  const s = String(adres || '').trim();
+  if (!s) return false;
+  try {
+    const h = new URL(/^https?:\/\//i.test(s) ? s : 'https://' + s).hostname;
+    return /(^|\.)nvidia\.com$/i.test(h);
+  } catch (e) { return /nvidia\.com/i.test(s); }
+};
 
 // Ответ старого воркера (версии 1) на путь /nvidia/... — «нет такого пути».
 const STARYJ_VORKER = /нет такого пути/i;
