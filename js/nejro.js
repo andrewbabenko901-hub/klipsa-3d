@@ -56,11 +56,22 @@ export const POSTAVSHCHIKI = {
     ceny: { 'gemini-3.5-flash-lite':{vhod:0.30,vyhod:2.50}, 'gemini-3.5-flash':{vhod:0.60,vyhod:3.50},
             'gemini-3.1-flash-lite':{vhod:0.20,vyhod:1.60}, 'gemini-2.5-flash':{vhod:0.30,vyhod:2.50} },
     async spisokModeley(klyuch) {
-      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200',
+      // тянем ВЕСЬ список моделей ключа, а не только те, что зашиты в коде:
+      // у Google их десятки и они меняются каждый месяц
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000',
                             { headers:{ 'x-goog-api-key': klyuch } });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error?.message || ('HTTP ' + r.status));
-      return (j.models||[]).map(m => String(m.name).replace('models/',''));
+      const vse = (j.models||[]).map(m => ({
+        imya: String(m.name).replace('models/',''),
+        metody: m.supportedGenerationMethods || [],
+      }));
+      const godnye = vse.filter(m => m.metody.includes('generateContent') &&
+                                     !/embedding|aqa|tts|embed/i.test(m.imya));
+      const spisok = godnye.map(m => m.imya).sort();
+      spisok.kartinki = godnye.map(m => m.imya).filter(n => /image|imagen|banana/i.test(n)).sort();
+      spisok.vsego = vse.length;
+      return spisok;
     },
     async razobrat(klyuch, model, foto, promt) {
       const chasti = [{ text: promt }];
@@ -243,9 +254,10 @@ export async function proverit(post, klyuch, model, adres) {
   try {
     const spisok = await p.spisokModeley(klyuch, adres);
     const est = !model || spisok.includes(model);
-    return { ok: est, modeli: spisok,
-      tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей.' +
-             (est ? ' Выбранная модель на месте.' : ' Но модели «' + model + '» среди них нет.') };
+    return { ok: est, modeli: spisok, kartinki: spisok.kartinki || [],
+      tekst: p.imya + ': ключ рабочий, доступно ' + spisok.length + ' моделей' +
+             (spisok.kartinki && spisok.kartinki.length ? ', из них ' + spisok.kartinki.length + ' рисуют картинки' : '') + '.' +
+             (est ? ' Выбранная модель на месте.' : ' Но модели «' + model + '» среди них нет — список обновлён, выбери из него.') };
   } catch (e) {
     let m = e.message || String(e);
     if (/Failed to fetch|NetworkError/i.test(m))

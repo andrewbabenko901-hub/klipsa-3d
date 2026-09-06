@@ -10,7 +10,6 @@ import { svesti, svodka } from './konsensus.js';
 import { sobrat, podognat, summarno, elementDlya, masshtab } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
 import { vStl, skachat } from './stl.js';
-import { PROBY } from './proby.js';
 import * as SIL from './siluet.js';
 
 const $ = s => document.querySelector(s);
@@ -20,7 +19,7 @@ const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
   rashod: [], granicy: null, nalozhenie: null, masshtab: null,
-  izmery: [], vidy: null, svodkaVidov: null,
+  izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null,
 };
 
 // ---------- хранилище ----------
@@ -112,6 +111,7 @@ function geomRecepta(els) {
 function pererisovat() {
   if (!S.els.length) { pokazatModel(null); return; }
   const { celoe, kuski } = geomRecepta(S.els);
+  S.geomCeloe = celoe;
   const cvet = (S.izmer && S.izmer.cvet) || [74,132,92];
   pokazatModel(celoe, cvet);
   const gab = summarno(S.els);
@@ -455,19 +455,32 @@ function risovatMasku() {
   const cv = $('#holstMaski'), box = $('#stsena');
   // холст под размер окна: раньше картинка 900x500 растягивалась на любую
   // форму контейнера, и деталь на ней переставала быть собой
-  const rw = box.clientWidth || 900, rh = box.clientHeight || 420;
-  const k = Math.max(1, Math.min(2.4, 1200 / rw));   // без искажения пропорций
-  const w = Math.round(rw * k), h = Math.round(rh * k);
-  if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
-  // на два-три вида нужно больше высоты, иначе картинки сжимаются в марки
-  const vsegoVidov = (S.izmery || []).filter(v => v.izmer).length || 1;
-  box.classList.toggle('vidov2', vsegoVidov === 2);
-  box.classList.toggle('vidov3', vsegoVidov >= 3);
   const nalPoRoli = {};
   if (S.svodkaVidov) for (const x of S.svodkaVidov.vidy) nalPoRoli[x.rol] = x;
   const vidy = (S.izmery || []).filter(v => v.izmer).map(v =>
     ({ rol: v.rol, izmer: v.izmer, granicy: S.granicy, nal: nalPoRoli[v.rol] || null }));
+
+  // Снимка сбоку нет — показываем, каким видит бок сама модель. Так видно,
+  // что она построила по глубине, и есть с чем спорить руками.
+  if (!vidy.some(v => v.rol === 'sboku') && S.geomCeloe) {
+    try {
+      const sil = SIL.siluetGeometrii(S.geomCeloe, 260, 90);
+      if (sil && sil.W > 1) {
+        const pm = O.polosyMaski(sil);
+        vidy.push({ rol:'sboku', izModeli:true, maska: sil, granicy: S.granicy,
+                    polosy: pm.polosy, runs: pm.runs, nal: null });
+      }
+    } catch (e) { console.warn('вид сбоку из модели не построился:', e.message); }
+  }
   const shirMm = S.masshtab ? S.masshtab.mm : (+$('#pGolova').value || 0);
+  // на два-три ряда нужно больше высоты, иначе картинки сжимаются в марки
+  box.classList.toggle('vidov2', vidy.length === 2);
+  box.classList.toggle('vidov3', vidy.length >= 3);
+  const rw2 = box.clientWidth || 900, rh2 = box.clientHeight || 420;
+  const k2 = Math.max(1, Math.min(2.4, 1200 / rw2));
+  const w2 = Math.round(rw2 * k2), h2 = Math.round(rh2 * k2);
+  if (cv.width !== w2 || cv.height !== h2) { cv.width = w2; cv.height = h2; }
+
   O.narisovatRazbor(cv, S.izmer, S.granicy, {
     shirinaMm: shirMm,
     vysotaMm: shirMm * (S.izmer.vysotaKShirine || 1),   // высота у всех видов одна
@@ -500,7 +513,7 @@ function pokazatFoto() {
 async function sintez() {
   skazatOshibku(''); shagiSbros();
   if (!S.foto.length) return skazatOshibku(
-    'Нет фотографии. Нажми на рамку и выбери файл. Хочешь просто посмотреть — щёлкни эталонную проверку слева.', true);
+    'Нет фотографии. Нажми на рамку и выбери файл — вид спереди обязателен, вид сбоку даёт сечение.', true);
 
   const vkl = LS.vkl, klyuchi = LS.klyuchi, modeli = LS.modeli;
   const kogo = Object.keys(N.POSTAVSHCHIKI).filter(p => vkl[p] && (klyuchi[p]||'').trim());
@@ -637,26 +650,6 @@ function pokazatIstoriyu() {
   });
 }
 
-// ---------- эталоны ----------
-function pokazatProby() {
-  const b = $('#proby'); b.innerHTML = '';
-  PROBY.forEach(pr => {
-    const d = document.createElement('div'); d.className = 'proba';
-    d.innerHTML = `<b>${pr.p}</b><span>${pr.o}</span>`;
-    d.onclick = () => {
-      S.tela = JSON.parse(JSON.stringify(pr.tela));
-      S.izmer = JSON.parse(JSON.stringify(pr.izmer));
-      S.svod = null; S.varianty = [];
-      $('#pNomer').value = pr.p; $('#pOpisanie').value = pr.o;
-      $('#pGolova').value = pr.kat.shirinaMm || '';
-      shagiSbros(); shag('obmer','est'); shag('razbor','est'); shag('sborka','est');
-      $('#znIstochnik').textContent = 'эталон';
-      pokazatKuski(); peresobrat(); pokazatSravnenie(); skazatOshibku('');
-    };
-    b.appendChild(d);
-  });
-}
-
 // ---------- настройки нейронок ----------
 function pokazatPostavshchikov() {
   const c = $('#postavshchiki'); c.innerHTML = '';
@@ -706,9 +699,18 @@ function pokazatPostavshchikov() {
                          : `<div class="oshibka" style="margin-top:7px">${r.tekst}</div>`;
       const sel = d.querySelector('[data-model]');
       if (r.modeli?.length && sel) {
+        // показываем ВЕСЬ список ключа: сначала те, что мы рекомендуем,
+        // потом остальные — их у Google десятки и они меняются
         const bylo = sel.value;
-        const nabor = [...new Set([...p.modeli, ...r.modeli])].filter(m => r.modeli.includes(m));
-        sel.innerHTML = (nabor.length ? nabor : r.modeli).map(m => `<option${m===bylo?' selected':''}>${m}</option>`).join('');
+        const svoi = p.modeli.filter(m => r.modeli.includes(m));
+        const nabor = [...svoi, ...r.modeli.filter(m => !svoi.includes(m))];
+        sel.innerHTML = nabor.map(m => `<option${m===bylo?' selected':''}>${m}</option>`).join('');
+        if (!nabor.includes(bylo)) { const m2 = LS.modeli; m2[id] = sel.value; LS.modeli = m2; obnovitKtoSprashivat(); }
+      }
+      if (r.kartinki?.length) {
+        const sk = $('#nModelKartinka'), bylo = LS.modelKartinki;
+        sk.innerHTML = r.kartinki.map(m => `<option${m===bylo?' selected':''}>${m}</option>`).join('');
+        if (!r.kartinki.includes(bylo)) LS.modelKartinki = sk.value;
       }
       b.disabled = false;
     };
@@ -832,7 +834,7 @@ async function shablonPoUmolchaniyu() {
 // ---------- запуск ----------
 function start() {
   plotnost(LS.plotnost);
-  scenaInit(); pokazatProby(); pokazatIstoriyu(); pokazatSpravochnik(); pokazatRezultat();
+  scenaInit(); pokazatIstoriyu(); pokazatSpravochnik(); pokazatRezultat();
   pokazatPostavshchikov(); obnovitKtoSprashivat();
 
   // выпадающие списки методов
@@ -955,5 +957,6 @@ function start() {
   $('#knOchistit').onclick = () => { if (confirm('Стереть историю разборов?')) { LS.istoria = []; pokazatIstoriyu(); } };
 
   vkladka('model');
+  window.__S = S;   // для отладки: видно состояние из консоли браузера
 }
 start();

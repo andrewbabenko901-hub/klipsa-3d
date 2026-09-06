@@ -234,33 +234,38 @@ export function profil(metka, nom, W, H, ramka, vert, N = 40) {
  * полосы берётся объединение занятых столбцов по всем её строкам, из него
  * достаются отрезки материала (runs), доля заполнения и зазор.
  */
-export function profilPolnyj(metka, nom, W, H, ramka, vert, N = 40) {
+export function profilPolnyj(metka, nom, W, H, ramka, vert, N = 40, material = null) {
   const { x0, x1, y0, y1 } = ramka;
   const a0 = vert ? y0 : x0, a1 = vert ? y1 : x1;
   const b0 = vert ? x0 : y0, b1 = vert ? x1 : y1;
   const L = a1 - a0 + 1, B = b1 - b0 + 1;
   const ogib = [], telo = [], zapoln = [], runs = [], centr = [];
-  const stolb = new Uint8Array(B);
+  const stolb = new Uint8Array(B);      // деталь целиком, с заклеенными дырами
+  const stolbM = new Uint8Array(B);     // только материал: дырки не в счёт
   for (let i = 0; i < N; i++) {
-    stolb.fill(0);
+    stolb.fill(0); stolbM.fill(0);
     const p0 = a0 + Math.floor(L*i/N);
     const p1 = a0 + Math.max(Math.floor(L*i/N)+1, Math.floor(L*(i+1)/N));
     for (let p = p0; p < p1; p++) for (let q = 0; q < B; q++) {
       const idx = vert ? (p*W + b0 + q) : ((b0 + q)*W + p);
-      if (metka[idx] === nom) stolb[q] = 1;
+      if (metka[idx] === nom) { stolb[q] = 1; if (!material || material[idx]) stolbM[q] = 1; }
     }
+    // огибающая — по контуру детали, просветы — по материалу: сквозная дырка
+    // внутри детали должна быть видна как просвет, а не заклеиваться
+    let lo = -1, hi = -1;
+    for (let q = 0; q < B; q++) if (stolb[q]) { if (lo < 0) lo = q; hi = q; }
+    const og = lo < 0 ? 0 : (hi - lo + 1)/B;
     const rr = []; let s = -1, est = 0;
     for (let q = 0; q < B; q++) {
-      if (stolb[q]) { est++; if (s < 0) s = q; }
+      if (stolbM[q]) { est++; if (s < 0) s = q; }
       else if (s >= 0) { rr.push([s/B, q/B]); s = -1; }
     }
     if (s >= 0) rr.push([s/B, 1]);
-    const og = rr.length ? (rr[rr.length-1][1] - rr[0][0]) : 0;
     ogib.push(og);
     telo.push(est/B);
     zapoln.push(og > 0 ? (est/B)/og : 1);
     runs.push(rr);
-    centr.push(rr.length ? (rr[rr.length-1][1] + rr[0][0])/2 : 0.5);
+    centr.push(lo < 0 ? 0.5 : (lo + hi + 1)/(2*B));
   }
   return { ogib, telo, zapoln, runs, centr, shirinaPx: B, vysotaPx: L };
 }
