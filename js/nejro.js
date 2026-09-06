@@ -87,6 +87,31 @@ async function poslat(url, zagolovki, telo, imya) {
 }
 
 /**
+ * Мелкие модели переводят имена полей на русский: «тела» вместо tela, «тип»
+ * вместо tip. Формально они правы — промпт по-русски, — но приложение ждёт
+ * латиницу и молча получает ноль тел. Переименовываем известные ключи обратно.
+ * Значения не трогаем: там перечисления, и они и так латиницей.
+ */
+const KLYUCHI_PO_RUSSKI = {
+  'тела':'tela', 'тело':'tela', 'номер':'nomer', 'тип':'tip', 'сечение':'sechenie',
+  'рёбра':'rebra', 'ребра':'rebra', 'зубцов':'zubcov', 'зубцы':'zubcov',
+  'направлениеЗубцов':'napravlenieZubcov', 'направление_зубцов':'napravlenieZubcov',
+  'доляВысоты':'dolyaVysoty', 'доля_высоты':'dolyaVysoty',
+  'доляШирины':'dolyaShiriny', 'доля_ширины':'dolyaShiriny',
+  'сужается':'suzhaetsya', 'описание':'opisanie', 'уверенность':'uverennost',
+  'типДетали':'tipDetali', 'тип_детали':'tipDetali',
+  'видовНаФото':'vidovNaFoto', 'видов_на_фото':'vidovNaFoto',
+  'сомнения':'somneniya', 'уверенностьОбщая':'uverennostObshchaya',
+};
+function poLatinice(v) {
+  if (Array.isArray(v)) return v.map(poLatinice);
+  if (!v || typeof v !== 'object') return v;
+  const o = {};
+  for (const [k, z] of Object.entries(v)) o[KLYUCHI_PO_RUSSKI[k] || k] = poLatinice(z);
+  return o;
+}
+
+/**
  * Достать JSON из ответа модели.
  *
  * Мелкие зрячие модели (llama-4-scout и подобные) любят сперва рассказать
@@ -186,7 +211,7 @@ export const POSTAVSHCHIKI = {
         'Gemini');
       const t = (j?.candidates?.[0]?.content?.parts || []).map(p => p.text||'').join('');
       const u = j?.usageMetadata || {};
-      return { dannye: razobratJson(t, 'Gemini'),
+      return { dannye: poLatinice(razobratJson(t, 'Gemini')),
                rashod:{ vhod:u.promptTokenCount||0, vyhod:(u.candidatesTokenCount||0)+(u.thoughtsTokenCount||0) } };
     },
   },
@@ -213,7 +238,7 @@ export const POSTAVSHCHIKI = {
             json_schema:{ name:'razbor_klipsy', strict:true, schema: strogaya(SHEMA) } } },
         'OpenAI');
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'OpenAI'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'OpenAI')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -284,7 +309,7 @@ export const POSTAVSHCHIKI = {
             json_schema:{ name:'razbor_klipsy', strict:true, schema: strogaya(SHEMA) } } },
         'OpenRouter');
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'OpenRouter'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'OpenRouter')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -316,7 +341,7 @@ export const POSTAVSHCHIKI = {
           response_format:{ type:'json_object' } },
         'Hugging Face');
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Hugging Face'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'Hugging Face')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -345,7 +370,7 @@ export const POSTAVSHCHIKI = {
         { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2, max_tokens:4096 },
         'Together');
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Together'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'Together')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -399,7 +424,7 @@ export const POSTAVSHCHIKI = {
         j = await poslat(url, zag, telo, 'NVIDIA');
       }
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'NVIDIA'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'NVIDIA')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -432,7 +457,7 @@ export const POSTAVSHCHIKI = {
           response_format:{ type:'json_object' } },
         'Свой API');
       const u = j.usage || {};
-      return { dannye: razobratJson(j?.choices?.[0]?.message?.content, 'Свой API'),
+      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'Свой API')),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
