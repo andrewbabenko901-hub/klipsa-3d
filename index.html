@@ -10,20 +10,20 @@
 {"imports":{
   "three":"./vendor/three/three.module.js",
   "three/addons/":"./vendor/three/addons/",
-  "./js/algoritmy.js":"./js/algoritmy.js?v=15",
-  "./js/kruglost.js":"./js/kruglost.js?v=15",
-  "./js/objyom.js":"./js/objyom.js?v=15",
-  "./js/elementy.js":"./js/elementy.js?v=15",
-  "./js/geom.js":"./js/geom.js?v=15",
-  "./js/konsensus.js":"./js/konsensus.js?v=15",
-  "./js/nejro.js":"./js/nejro.js?v=15",
-  "./js/obmer.js":"./js/obmer.js?v=15",
-  "./js/sborka.js":"./js/sborka.js?v=15",
-  "./js/shema.js":"./js/shema.js?v=15",
-  "./js/siluet.js":"./js/siluet.js?v=15",
-  "./js/stl.js":"./js/stl.js?v=15",
-  "./js/vidy.js":"./js/vidy.js?v=15",
-  "./js/main.js":"./js/main.js?v=15"
+  "./js/algoritmy.js":"./js/algoritmy.js?v=16",
+  "./js/kruglost.js":"./js/kruglost.js?v=16",
+  "./js/objyom.js":"./js/objyom.js?v=16",
+  "./js/elementy.js":"./js/elementy.js?v=16",
+  "./js/geom.js":"./js/geom.js?v=16",
+  "./js/konsensus.js":"./js/konsensus.js?v=16",
+  "./js/nejro.js":"./js/nejro.js?v=16",
+  "./js/obmer.js":"./js/obmer.js?v=16",
+  "./js/sborka.js":"./js/sborka.js?v=16",
+  "./js/shema.js":"./js/shema.js?v=16",
+  "./js/siluet.js":"./js/siluet.js?v=16",
+  "./js/stl.js":"./js/stl.js?v=16",
+  "./js/vidy.js":"./js/vidy.js?v=16",
+  "./js/main.js":"./js/main.js?v=16"
 }}
 </script>
 </head>
@@ -33,7 +33,7 @@
   <div class="znak">K</div>
   <div class="rastyanut">
     <h1>Разбор клипсы — 3D по фотографии</h1>
-    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v15</span></div>
+    <div class="pod">обмер силуэта → примитивы → параметрическая модель ClipGen, чертёж и STL <span class="versiya">v16</span></div>
   </div>
   <div class="prav">
     <div class="plotnost" title="Плотность вёрстки">
@@ -251,11 +251,19 @@
       строго на сервер своего поставщика. В коде и в репозитории их нет.</div></header>
   <div class="telo">
     <div id="postavshchiki"></div>
-    <h3 class="razdel">Картинка-лист (только Google)</h3>
+    <h3 class="razdel">Кто рисует картинки</h3>
     <div class="para">
+      <div class="pole"><label>Через кого</label><select id="nRisovalka"></select></div>
       <div class="pole"><label>Модель картинки</label><select id="nModelKartinka"></select></div>
+    </div>
+    <div class="para" style="margin-top:7px">
+      <div class="pole" id="poleRisAdres" hidden><label>Адрес рисовалки</label>
+        <input type="text" id="nRisAdres" placeholder="https://свой-worker.workers.dev/v1"></div>
       <div class="pole"><label>Шаблон вёрстки</label><input type="file" id="nShablon" accept="image/*"></div>
     </div>
+    <div class="podskazka">У Google для картиночных моделей нужен биллинг — на бесплатном ключе
+      они отвечают 429. Те же модели несёт OpenRouter и платит своими кредитами: биллинг Google
+      не нужен. Совсем бесплатно — свой Cloudflare Worker, см. <b>ClipGen\BESPLATNO.md</b>.</div>
     <div class="mini" id="miniShablon"></div>
     <div class="podskazka">Шаблон — чистый лист без единой буквы. Эталон с таблицей класть нельзя:
       модель начинает копировать с него текст, а иногда и саму деталь.</div>
@@ -276,6 +284,6 @@
   <footer><button class="knopka" id="knZakrytSpravochnik">Закрыть</button></footer>
 </dialog>
 
-<script type="module" src="js/main.js?v=15"></script>
+<script type="module" src="js/main.js?v=16"></script>
 </body>
 </html>
