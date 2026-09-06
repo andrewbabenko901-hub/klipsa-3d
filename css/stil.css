@@ -156,7 +156,7 @@ textarea{resize:vertical;min-height:calc(46px*var(--m))}
 .stsena{flex:1;min-height:calc(200px*var(--m));position:relative;margin-top:calc(8px*var(--m));
   border-radius:calc(7px*var(--m));background:#0b1512;overflow:hidden}
 .stsena>*{position:absolute;inset:0;width:100%;height:100%}
-.stsena canvas{display:block}
+.stsena canvas{display:block;object-fit:contain}
 .stsena img{object-fit:contain}
 canvas.holst{background:#0b1512}
 .podskazka{color:var(--tusklo);font-size:calc(10px*var(--m));margin-top:calc(5px*var(--m))}
@@ -277,3 +277,10 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
   .stsena{height:62vw;max-height:calc(420px*var(--m))}
   .blok.rastyot{flex:none}
 }
+
+/* совпадение силуэта модели со снимком */
+.sovpad{margin:calc(8px * var(--m)) 0 calc(4px * var(--m))}
+.sovpad .polosa{height:calc(8px * var(--m));border-radius:99px;background:#16261f;overflow:hidden}
+.sovpad .polosa i{display:block;height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,#2a8f5e,#3fbf7f);transition:width .35s}
+.sovpad .tiho{margin-top:calc(4px * var(--m))}
