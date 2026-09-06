@@ -271,6 +271,35 @@ export function meriTelo(izmer, a, b) {
            rebristo: verhi.length >= 2 && vpadiny.length >= 2 };
 }
 
+/**
+ * Согласие двух видов по высоте.
+ *
+ * У одной и той же детали ступени профиля стоят на одних и тех же высотах,
+ * с какой стороны ни смотри: ширина меняется, а места переходов — нет.
+ * Считаем корреляцию сглаженных модулей производной профиля. Если нейронка
+ * перерисовала деталь по-своему, ступени разъедутся и число упадёт.
+ */
+export function soglasieVysot(a, b) {
+  // ступени профиля — локальные максимумы модуля производной, в долях высоты
+  const stupeni = p => {
+    const d = [];
+    for (let i = 1; i < p.length; i++) d.push(Math.abs(p[i] - p[i-1]));
+    const m = Math.max(...d) || 1;
+    const n = d.map(v => v/m), out = [];
+    for (let i = 1; i < n.length-1; i++)
+      if (n[i] >= n[i-1] && n[i] >= n[i+1] && n[i] > 0.25) out.push((i + 0.5) / p.length);
+    return out;
+  };
+  const x = stupeni(a.polosy || []), y = stupeni(b.polosy || []);
+  if (!x.length || !y.length) return 0;
+  // каждой ступени одного вида ищем ближайшую у другого и меряем разбег
+  const razbeg = (s1, s2) =>
+    s1.reduce((acc, v) => acc + Math.min(...s2.map(w => Math.abs(v - w))), 0) / s1.length;
+  const d = (razbeg(x, y) + razbeg(y, x)) / 2;
+  const raznoChislo = Math.abs(x.length - y.length) / Math.max(x.length, y.length);
+  return +Math.max(0, 1 - d*8 - raznoChislo*0.5).toFixed(3);
+}
+
 // Все варианты нарезки — чтобы выбрать число тел по совпадению силуэта.
 export function variantyRazbora(izmer, maxK = 8) {
   return A.variantyNarezki(izmer.polosy,
@@ -396,7 +425,8 @@ function risovatOdinVid(cx, v, px, y0, pw, rh, shrift, verh, opt) {
   if (!mv.grani) mv.grani = new Uint8Array(mv.W*mv.H);
   const B = mv.W, L = mv.H;
   const imya = ({ speredi:'спереди', sboku:'сбоку', sverhu:'сверху' }[v.rol] || 'вид') +
-               (v.izModeli ? ' · построен моделью, снимка нет' : '');
+               (v.izModeli ? ' · построен моделью, снимка нет'
+                : v.izNejronki ? ' · нарисован нейронкой' : '');
   const legenda = nal ? Math.round(shrift * 4.4) : 0;
   const dostupno = rh - verh;
   const sc = Math.min((pw - shrift*2.2) / B, (dostupno - 4) / L,

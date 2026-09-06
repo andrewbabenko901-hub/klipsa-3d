@@ -367,6 +367,28 @@ export const MODELI_KARTINOK = ['gemini-3.1-flash-image','gemini-3.1-flash-lite-
 export const CENY_KARTINOK = { 'gemini-3.1-flash-image':0.067, 'gemini-3.1-flash-lite-image':0.0336,
                                'gemini-3-pro-image':0.134, 'gemini-2.5-flash-image':0.10 };
 
+/**
+ * Нарисовать один чистый вид детали по фотографии.
+ * Шаблон вёрстки сюда НЕ идёт: он нужен для листа разбора, а здесь важно,
+ * чтобы в кадре был один предмет на белом и ни одной посторонней линии.
+ */
+export async function narisovatVid(klyuch, model, foto, promt) {
+  const j = await poslat(
+    'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent',
+    { 'Content-Type':'application/json', 'x-goog-api-key': klyuch },
+    { contents:[{ role:'user', parts:[
+        { text: promt },
+        { inline_data:{ mime_type: foto.mime||'image/png', data: foto.b64 } }] }],
+      generationConfig:{ responseModalities:['TEXT','IMAGE'], temperature:0.15 } },
+    'Gemini');
+  for (const p of (j?.candidates?.[0]?.content?.parts || [])) {
+    const d = p.inline_data || p.inlineData;
+    if (d?.data) return { kartinka: 'data:' + (d.mime_type||d.mimeType||'image/png') + ';base64,' + d.data,
+                          mime: d.mime_type||d.mimeType||'image/png', b64: d.data };
+  }
+  throw new Error('модель не вернула картинку');
+}
+
 export async function narisovatList(klyuch, model, shablon, foto, promt) {
   const j = await poslat(
     'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent',

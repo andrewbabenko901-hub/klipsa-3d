@@ -5,7 +5,7 @@ import { slozhit } from './geom.js';
 import * as O from './obmer.js';
 import * as A from './algoritmy.js';
 import * as N from './nejro.js';
-import { promtKartinki } from './shema.js';
+import { promtKartinki, promtVida } from './shema.js';
 import { svesti, svodka } from './konsensus.js';
 import { sobrat, podognat, summarno, elementDlya, masshtab } from './sborka.js';
 import { chertyozh, listRazbora } from './vidy.js';
@@ -19,7 +19,7 @@ const S = {
   foto: [], izmer: null, tela: [], els: [], zam: [],
   varianty: [], svod: null, shablon: null, nejro: null,
   rashod: [], granicy: null, nalozhenie: null, masshtab: null,
-  izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null,
+  izmery: [], vidy: null, svodkaVidov: null, geomCeloe: null, kontrolVida: null,
 };
 
 // ---------- хранилище ----------
@@ -205,6 +205,79 @@ function obmerit(tiho) {
 }
 
 /**
+ * Дорисовать недостающие виды нейронкой.
+ *
+ * Порядок такой: сначала рисуем КОНТРОЛЬНЫЙ вид спереди и накладываем его на
+ * настоящий снимок. Если модель нарисовала не ту деталь — это видно сразу, и
+ * тогда отбрасываются все нарисованные виды, а обмер идёт по фотографии.
+ * Только когда контроль прошёл, берём вид сбоку: сверить его не с чем, но раз
+ * на проверяемом виде модель не соврала, ему можно верить с оговоркой.
+ *
+ * Абсолютные размеры всё равно снимаются с настоящего снимка. Нарисованный
+ * даёт форму сечения — то, чего на одном фото нет в принципе.
+ */
+async function dorisovatVidy() {
+  const gk = (LS.klyuchi.gemini || '').trim();
+  if (!gk) throw new Error('Для эталонных видов нужен ключ Google.');
+  const model = LS.modelKartinki;
+  const porog = +$('#oPorogVida').value || 0.8;
+  const nastr = nastrojkiObrabotki();
+  const podskazka = $('#pPodskazka').value.trim();
+
+  const front = (S.izmery || []).find(v => v.rol === 'speredi' && v.izmer && !v.izNejronki);
+  const fotoFront = S.foto[(front ? front.nomer : 1) - 1] || S.foto[0];
+  if (!front || !fotoFront) throw new Error('Нет снимка спереди — с чем сверять.');
+
+  const zagruzit = async url => {
+    const im = new Image();
+    await new Promise((res, rej) => { im.onload = res; im.onerror = () => rej(new Error('картинка не открылась')); im.src = url; });
+    return im;
+  };
+  const narisovat = async rol => {
+    const r = await N.narisovatVid(gk, model, fotoFront, promtVida(rol, podskazka));
+    S.rashod.push({ istochnik: 'вид ' + rol, post: 'gemini', model, kartinok: 1 });
+    return r;
+  };
+
+  // 1. контрольный вид спереди
+  const k = await narisovat('speredi');
+  const izmK = O.obmerit(await zagruzit(k.kartinka), nastr);
+  const sv = SIL.sravnit(O.maskaVyravnennaya(front.izmer), O.maskaVyravnennaya(izmK), 200);
+  const iou = sv ? sv.iou : 0;
+  S.kontrolVida = { iou, porog, kartinka: k.kartinka };
+  // показываем, что именно нарисовала нейронка — и когда прошло, и когда нет
+  $('#nejroList').innerHTML =
+    `<div style="padding:10px"><div class="podskazka" style="margin-bottom:6px">
+       Контрольный вид спереди, нарисован нейронкой. Совпал со снимком на
+       <b>${Math.round(iou*100)}%</b> при пороге ${Math.round(porog*100)}%.</div>
+     <img src="${k.kartinka}" style="max-width:100%"></div>`;
+  if (iou < porog) {
+    S.zam.push('нейронка нарисовала деталь на ' + Math.round(iou*100) + '% похожую на снимок ' +
+               '(нужно ' + Math.round(porog*100) + '%) — все нарисованные виды отброшены, мерим по фото');
+    return { ok: false, iou };
+  }
+
+  // 2. вид сбоку — его-то и не хватает
+  const nuzhen = !(S.izmery || []).some(v => v.rol === 'sboku' && v.izmer);
+  if (!nuzhen) return { ok: true, iou, dobavleno: 0 };
+  const b = await narisovat('sboku');
+  const izmB = O.obmerit(await zagruzit(b.kartinka), nastr);
+  const sogl = O.soglasieVysot(front.izmer, izmB);
+  if (sogl < 0.3) {
+    S.zam.push('вид сбоку нарисован, но ступени профиля на нём стоят на других высотах ' +
+               '(согласие ' + sogl + ') — вид отброшен');
+    return { ok: false, iou, sogl };
+  }
+  S.izmery.push({ rol:'sboku', nomer: S.izmery.length+1, izmer: izmB,
+                  izNejronki: true, kartinka: b.kartinka, iouKontrolya: iou, soglasie: sogl });
+  S.vidy = O.sopostavitVidy(S.izmer, izmB);
+  S.zam.push('вид сбоку нарисован нейронкой: контрольный вид совпал со снимком на ' +
+             Math.round(iou*100) + '%, ступени сошлись на ' + Math.round(sogl*100) + '% — ' +
+             'сечение взято с него, миллиметры по-прежнему с фотографии');
+  return { ok: true, iou, sogl, dobavleno: 1 };
+}
+
+/**
  * Разбор без нейронки. Сколько тел — решает не штраф из головы: перебираются
  * все нарезки от двух тел до восьми, каждая собирается в настоящую модель, и
  * побеждает та, чей силуэт ближе всего лёг на снимок.
@@ -302,6 +375,9 @@ function pokazatRezultat() {
     (izvestno ? vz : dd).insertAdjacentHTML('beforeend', `<li>${S.masshtab.otkuda}</li>`);
   }
   if (kat.otverstie) vz.insertAdjacentHTML('beforeend', `<li>Отверстие Ø${kat.otverstie} мм — каталог</li>`);
+  const nar = (S.izmery||[]).filter(v => v.izNejronki && v.izmer).length;
+  if (nar) dd.insertAdjacentHTML('beforeend',
+    `<li>Видов нарисовано нейронкой: ${nar}${S.kontrolVida ? ', контроль ' + Math.round(S.kontrolVida.iou*100) + '%' : ''}</li>`);
   if (S.izmer && S.izmer.otverstie) vz.insertAdjacentHTML('beforeend',
     `<li>Дырка на снимке: ${Math.round(S.izmer.otverstie.dolyaD*100)}% ширины${S.izmer.otverstie.skvoznoe?', сквозная':''}</li>`);
   if (kat.dlinaShtoka) vz.insertAdjacentHTML('beforeend', `<li>Длина штока ${kat.dlinaShtoka} мм — каталог</li>`);
@@ -526,6 +602,16 @@ async function sintez() {
     shag('obmer','idet');
     if (!obmerit()) throw new Error('обмер не удался');
     shag('obmer','est');
+
+    if ($('#chVidy').checked) {
+      shag('vidy','idet');
+      try {
+        const r = await dorisovatVidy();
+        shag('vidy', r.ok ? 'est' : 'sboj');
+        if (!r.ok) skazatOshibku('Нарисованные виды не прошли сверку с фото — ' +
+          'разбор идёт по фотографии. Подробности в «Додумано моделью».', false);
+      } catch (e) { shag('vidy','sboj'); skazatOshibku(perevesti(e.message)); }
+    }
 
     S.varianty = [];
     if (sAlgoritmom) { const a = razborAlgoritmom(); if (a) S.varianty.push(a); }
@@ -882,6 +968,8 @@ function start() {
   addEventListener('paste', ev => { if (ev.clipboardData?.files?.length) vstavitFoto(ev.clipboardData.files); });
 
   $('#knSintez').onclick = sintez;
+  $('#chVidy').onchange = e => { $('#poleVidy').hidden = !e.target.checked; };
+  $('#oPorogVida').oninput = e => { $('#znPorogVida').textContent = Math.round(e.target.value*100) + '%'; };
   $('#knPereschitat').onclick = peresobrat;
   $('#knPodognat').onclick = podognatPoFoto;
   $('#knObmerit').onclick = () => {
