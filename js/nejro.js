@@ -75,6 +75,10 @@ async function poslat(url, zagolovki, telo, imya) {
   let j = null; try { j = JSON.parse(t); } catch {}
   if (!r.ok) {
     const m = j?.error?.message || j?.message || t.slice(0, 240);
+    if (/rate-limited upstream|ResourceExhausted|request limit reached|temporarily rate-limited/i.test(m))
+      throw new Error(imya + ': выбранная бесплатная модель сейчас занята у провайдера. ' +
+        'Возьми другую из списка — например minimax/minimax-m3:free — или повтори через минуту. ' +
+        'Ответ поставщика: ' + m);
     if (r.status === 402 || /more credits|insufficient|can only afford/i.test(m))
       throw new Error(imya + ': не хватает кредитов на счёте. ' +
         'Пополни счёт у поставщика — либо переключи «Через кого рисовать» на ' +
@@ -121,6 +125,32 @@ function poLatinice(v) {
  * открывающей скобке, считаем вложенность с учётом строк и экранирования, и
  * берём самый крупный кусок, который действительно разобрался.
  */
+/**
+ * Слабые модели любят ответить списком в markdown вместо JSON: «- **tela**: 5»
+ * и так далее. Разбирать такую прозу — гиблое дело, надёжнее переспросить,
+ * прижав модель к стенке. Этот хвост дописывается к промпту на втором заходе.
+ */
+const TOLKO_JSON = `
+
+ВНИМАНИЕ. Предыдущий ответ был не в том формате. Ответь ЗАНОВО и строго так:
+первый символ ответа — открывающая фигурная скобка, последний — закрывающая.
+Никакого текста до и после, никаких пояснений, никаких списков, никакого
+markdown, ни одной звёздочки и ни одного дефиса в начале строк. Только JSON.`;
+
+/**
+ * Спросить и, если ответ оказался не JSON, переспросить один раз жёстче.
+ * `sprosit(dopolnenie)` должна выполнить запрос и вернуть текст ответа.
+ */
+async function sprositJson(sprosit, imya) {
+  let pervyj;
+  try { pervyj = await sprosit(''); return { dannye: razobratJson(pervyj, imya), povtor: false }; }
+  catch (e) {
+    if (!/не похож на JSON|пустой ответ/.test(e.message)) throw e;
+    const vtoroj = await sprosit(TOLKO_JSON);
+    return { dannye: razobratJson(vtoroj, imya), povtor: true };
+  }
+}
+
 function razobratJson(tekst, imya) {
   if (!tekst) throw new Error(imya + ': пустой ответ');
 
@@ -281,7 +311,11 @@ export const POSTAVSHCHIKI = {
   openrouter: {
     imya: 'OpenRouter — много моделей одним ключом',
     gdeKlyuch: 'https://openrouter.ai/keys',
-    modeli: ['openrouter/free','google/gemma-4-31b-it:free','minimax/minimax-m3:free',
+    // Проверено живыми запросами 6 сентября: minimax отвечает за 14 с и даёт
+    // готовый JSON с телами; nemotron от NVIDIA тоже зрячий и бесплатный, но
+    // медленнее и упирается в лимит провайдера; gemma сейчас глухо отбивает 429.
+    modeli: ['minimax/minimax-m3:free','nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free',
+             'openrouter/free','google/gemma-4-31b-it:free',
              'google/gemini-2.5-flash','qwen/qwen2.5-vl-72b-instruct','meta-llama/llama-4-maverick'],
     ceny: {},
     async spisokModeley(klyuch) {
@@ -299,17 +333,28 @@ export const POSTAVSHCHIKI = {
       return spisok;
     },
     async razobrat(klyuch, model, foto, promt) {
-      const soderzhanie = [{ type:'text', text: promt }];
-      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
-      const j = await poslat('https://openrouter.ai/api/v1/chat/completions',
-        { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch,
-          'HTTP-Referer':location.origin, 'X-Title':'klipsa-3d' },
-        { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
-          response_format:{ type:'json_schema',
-            json_schema:{ name:'razbor_klipsy', strict:true, schema: strogaya(SHEMA) } } },
-        'OpenRouter');
-      const u = j.usage || {};
-      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'OpenRouter')),
+      // Бесплатные модели строгую json_schema чаще всего не тянут и отвечают
+      // ошибкой про response_format. Им отдаём мягкий json_object, платным —
+      // строгую схему, как и раньше.
+      const besplatnaya = /:free$/.test(model) || model === 'openrouter/free';
+      const format = besplatnaya
+        ? { type:'json_object' }
+        : { type:'json_schema', json_schema:{ name:'razbor_klipsy', strict:true, schema: strogaya(SHEMA) } };
+      let u = {};
+      const sprosit = async (hvost) => {
+        const soderzhanie = [{ type:'text', text: promt + hvost }];
+        for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+        const j = await poslat('https://openrouter.ai/api/v1/chat/completions',
+          { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch,
+            'HTTP-Referer':location.origin, 'X-Title':'klipsa-3d' },
+          { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
+            max_tokens: 2000, response_format: format },
+          'OpenRouter');
+        u = j.usage || {};
+        return j?.choices?.[0]?.message?.content;
+      };
+      const r = await sprositJson(sprosit, 'OpenRouter');
+      return { dannye: poLatinice(r.dannye),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -449,15 +494,20 @@ export const POSTAVSHCHIKI = {
       return zryachieVpered(vse);
     },
     async razobrat(klyuch, model, foto, promt, adres) {
-      const soderzhanie = [{ type:'text', text: promt }];
-      for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
-      const j = await poslat(bazaSvoego(adres) + '/chat/completions',
-        { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch },
-        { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
-          response_format:{ type:'json_object' } },
-        'Свой API');
-      const u = j.usage || {};
-      return { dannye: poLatinice(razobratJson(j?.choices?.[0]?.message?.content, 'Свой API')),
+      let u = {};
+      const sprosit = async (hvost) => {
+        const soderzhanie = [{ type:'text', text: promt + hvost }];
+        for (const f of foto) soderzhanie.push({ type:'image_url', image_url:{ url: dataUrl(f) } });
+        const j = await poslat(bazaSvoego(adres) + '/chat/completions',
+          { 'Content-Type':'application/json', Authorization:'Bearer '+klyuch },
+          { model, messages:[{ role:'user', content: soderzhanie }], temperature:0.2,
+            response_format:{ type:'json_object' } },
+          'Свой API');
+        u = j.usage || {};
+        return j?.choices?.[0]?.message?.content;
+      };
+      const r = await sprositJson(sprosit, 'Свой API');
+      return { dannye: poLatinice(r.dannye),
                rashod:{ vhod:u.prompt_tokens||0, vyhod:u.completion_tokens||0 } };
     },
   },
@@ -578,6 +628,18 @@ export const RISOVALKI = {
                          'black-forest-labs/flux.1-dev',
                          'stabilityai/stable-diffusion-3.5-large'] },
 };
+
+/**
+ * Видит ли рисовалка присланную фотографию.
+ *
+ * Чат-модели (нанобанана и её родня) принимают картинку и рисуют «эту же
+ * деталь». Чистые диффузионки — flux, stable diffusion, sdxl — фотографию не
+ * видят вовсе: у них на входе только текст. Просить у них эталонный вид
+ * конкретной клипсы бессмысленно, а лист разбора — тем более: получится
+ * красивая посторонняя железка, иногда с выдуманными буквами.
+ */
+export const risovalkaVidit = (model) =>
+  !/flux|stable-diffusion|sdxl|dreamshaper|lightning|sana|shuttle/i.test(String(model || ''));
 
 /** Нарисовать картинку через выбранного поставщика. */
 export async function narisovatCherez(post, klyuch, model, foto, promt, adres, promtKratkij) {

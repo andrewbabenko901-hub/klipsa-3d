@@ -325,6 +325,11 @@ async function dorisovatVidy() {
   if (!gk) throw new Error('Для эталонных видов нужен ключ: ' +
     (N.RISOVALKI[ris.post]?.imya || ris.post) + '. Впиши его в «Нейронки и ключи».');
   const model = LS.modelKartinki;
+  if (!N.risovalkaVidit(model))
+    throw new Error('Модель «' + model + '» фотографию не видит — она рисует только по тексту. ' +
+      'Эталонный вид этой же клипсы она нарисовать не может, получится посторонняя деталь. ' +
+      'Возьми в «Через кого рисовать» модель, которая смотрит на снимок (нанобанана через ' +
+      'OpenRouter), либо нарисуй лист руками и брось его в «Лист с видами от нейронки».');
   const porog = +$('#oPorogVida').value || 0.8;
   const nastr = nastrojkiObrabotki();
   const podskazka = $('#pPodskazka').value.trim();
@@ -894,6 +899,11 @@ async function sintez() {
       const sh = S.shablon || LS.shablon;
       if (!gk) { shag('list','sboj'); skazatOshibku('Для листа картинкой нужен ключ: ' +
         (N.RISOVALKI[ris.post]?.imya || ris.post) + '.'); }
+      else if (!N.risovalkaVidit(LS.modelKartinki)) { shag('list','sboj'); skazatOshibku(
+        'Лист картинкой не собрать: модель «' + LS.modelKartinki + '» рисует только по тексту ' +
+        'и твою деталь не видит — вместо листа выйдет посторонняя железка, иногда с выдуманными ' +
+        'буквами. Готовый лист бери на вкладке «Лист разбора» — он строится из нашей модели ' +
+        'бесплатно и точно.'); }
       else if (!sh) { shag('list','sboj'); skazatOshibku('Нет шаблона вёрстки — положи его в настройках.'); }
       else try {
         const r2 = ris.post === 'gemini'
