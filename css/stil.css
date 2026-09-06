@@ -299,3 +299,8 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
 /* окно разбора на два-три вида — ему нужно больше высоты */
 .stsena.vidov2{min-height:calc(430px*var(--m))}
 .stsena.vidov3{min-height:calc(620px*var(--m))}
+
+/* номер версии — видно, свежий ли код в браузере */
+.versiya{display:inline-block;margin-left:calc(6px*var(--m));padding:0 calc(5px*var(--m));
+  border:1px solid var(--linia);border-radius:calc(4px*var(--m));color:var(--tusklo);
+  font-size:calc(9px*var(--m))}
