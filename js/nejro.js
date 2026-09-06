@@ -439,11 +439,13 @@ export const POSTAVSHCHIKI = {
     gdeKlyuch: 'https://build.nvidia.com/settings/api-keys',
     svoyAdres: true,
     adresPoUmolchaniyu: 'https://integrate.api.nvidia.com/v1',
-    podskazka: 'Ключ — кнопкой <b>Generate API Key</b> на build.nvidia.com/settings/api-keys ' +
-      '(значение показывают один раз). <b>Внимание:</b> NVIDIA не пускает запросы из браузера ' +
-      'с чужого сайта — заголовков CORS у неё нет. Прямой адрес сработает только через свой ' +
-      'прокси: поставь его сюда вместо адреса по умолчанию. Готовый конфиг лежит в ' +
-      '<b>ClipGen\\NVIDIA_proksi.md</b>.',
+    podskazka: 'Ключ — кнопкой <b>Generate API Key</b> на build.nvidia.com/settings/api-keys. ' +
+      'Ключ обязан начинаться с <b>nvapi-</b>: персональный ключ NGC вида «uuid:hex» даёт 401. ' +
+      '<b>Напрямую из браузера NVIDIA не работает</b> — у неё нет заголовков CORS, проверено ' +
+      'дважды. Нужен свой прокси. Если стоит наш Cloudflare Worker версии 2, впиши сюда ' +
+      '<b>https://имя.логин.workers.dev/nvidia/v1</b> — он пробрасывает запрос на ' +
+      'integrate.api.nvidia.com и ключ у себя не хранит. Код воркера — в ' +
+      '<b>ClipGen\\VORKER_index_v2.js</b>.',
     modeli: ['meta/llama-3.2-90b-vision-instruct','meta/llama-3.2-11b-vision-instruct',
              'google/gemma-3-12b-it','microsoft/phi-3-vision-128k-instruct','nvidia/neva-22b'],
     ceny: {},
