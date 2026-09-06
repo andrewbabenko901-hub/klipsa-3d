@@ -875,6 +875,16 @@ async function sintez() {
 
     shag('sborka','idet');
     pokazatKuski(); peresobrat(); pokazatSravnenie();
+    // Подгонка по силуэту — не украшение, а последний честный шаг сборки.
+    // Доли высоты и ширины из разбора дают форму приблизительно; покоординатный
+    // спуск доводит размеры до снимка. На живой клипсе это 83 % → 89 % и вдвое
+    // меньше «лишнего». Раньше кнопку надо было нажимать руками, и почти никто
+    // не нажимал — теперь делаем сами, если совпадение ниже 92 %.
+    if ($('#chPodgon')?.checked && S.els.length && S.nalozhenie &&
+        S.nalozhenie.iou < 0.92) {
+      shag('sborka','idet');
+      await podognatPoFoto(true);
+    }
     shag('sborka','est');
 
     if ($('#chList').checked) {
@@ -1115,7 +1125,7 @@ function ocenitVariantySiluetom(varianty) {
 const TYANEM_MM = ['d','dLow','dCore','dBore','len','t','t2','h','w','l','span','wing',
                    'core','spread','foot','s','okno','gap','barbD','dep','slot','slotW','bore'];
 
-async function podognatPoFoto() {
+async function podognatPoFoto(tiho) {
   if (!S.els.length || !S.izmer) { skazatOshibku('Сначала собери модель по фото.', true); return; }
   const kn = $('#knPodognat'), bylo = kn.textContent;
   kn.disabled = true; kn.textContent = 'Подгоняю…';
@@ -1137,7 +1147,7 @@ async function podognatPoFoto() {
       S.zam = S.zam.concat(['размеры подогнаны по силуэту: совпадение ' +
         Math.round(r.bylo*100) + '% → ' + Math.round(r.stalo*100) + '% (' + r.shagov + ' проб)']);
       pererisovat(); pokazatRezultat(); pokazatKuski();
-      vkladka('maska');
+      if (!tiho) vkladka('maska');
     } else {
       skazatOshibku('Лучше не стало — модель уже настолько близка к снимку, ' +
                     'насколько позволяют выбранные элементы (' + Math.round(r.bylo*100) + '%).', true);

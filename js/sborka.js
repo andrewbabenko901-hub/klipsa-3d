@@ -135,11 +135,27 @@ export function sobrat(tela, izmer, razmerMm, vidy) {
       // идёт куполом, у плоской грани ровной наклонной линией. Это третий
       // голос: он говорит «круглое или плоское», но не насколько плоское.
       const kr = M.kruglost;
+      // Светотень нельзя спрашивать про что попало.
+      //
+      // Диск, воротник, поясок, юбка, шайба — это кольца: сбоку видно тонкую
+      // полоску, и яркость поперёк неё ровная просто потому, что смотреть не
+      // на что. Свет тут отвечает «плоское» всегда, а элемент подменялся на
+      // прямоугольный брусок — круглая клипса превращалась в фонарь.
+      // Поэтому: кольцевым телам светотень не судья, а остальным верим только
+      // если тело достаточно высокое, чтобы на нём вообще было видно сечение.
+      const KOLCEVYE = ['disk','shlyapka_disk','vorotnik','poyasok','yubka','shajba','shejka'];
+      const kolco = KOLCEVYE.includes(t.tip);
+      const vysokoe = (M.dolyaVysoty || 0) >= 0.12;
       if (kr && kr.uverennost >= 0.5 && (!sechenie || sechenie === 'krugloe')) {
-        if (kr.okruglost < 0.38) {
+        if (kr.okruglost < 0.38 && !kolco && vysokoe && kr.uverennost >= 0.7) {
           sechenie = 'pryamougolnoe';
           otkudaSech = 'по светотени на снимке: ' + kr.pochemu +
                        ' (уверенность ' + Math.round(kr.uverennost*100) + '%)';
+        } else if (kr.okruglost < 0.38 && (kolco || !vysokoe)) {
+          otkudaSech = 'светотень говорит «плоское», но ' +
+            (kolco ? 'это кольцевое тело — сбоку у него и не может быть купола'
+                   : 'кусок слишком низкий, чтобы судить по свету') +
+            '; принято круглое';
         } else if (kr.okruglost > 0.62) {
           otkudaSech = 'по светотени на снимке: ' + kr.pochemu +
                        ' (уверенность ' + Math.round(kr.uverennost*100) + '%)';
