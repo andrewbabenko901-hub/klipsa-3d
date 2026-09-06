@@ -872,7 +872,17 @@ async function sintez() {
 
     shag('svod','idet');
     ocenitVariantySiluetom(S.varianty);
-    S.svod = svesti(S.varianty.filter(v => v.tela && v.tela.length));
+    // Опору и веса выбираем по ИЗМЕРЕННОМУ совпадению силуэта, а не по
+    // самооценке модели. Слабая модель бодро ставит себе 0.9 и, если верить
+    // цифре, становится опорной — а её разбор ложится на снимок хуже всех.
+    // Меряем: чей силуэт ближе к фотографии, тот и главный.
+    const zhivye = S.varianty.filter(v => v.tela && v.tela.length);
+    for (const v of zhivye) if (typeof v.iou === 'number') v.ves = Math.max(0.15, v.iou);
+    const poSiluetu = zhivye.filter(v => typeof v.iou === 'number')
+                            .sort((a, b) => b.iou - a.iou)[0];
+    if (poSiluetu) S.zam.push('опорным взят разбор «' + poSiluetu.istochnik +
+      '»: его силуэт ближе всех к фотографии — ' + Math.round(poSiluetu.iou*100) + '%');
+    S.svod = svesti(zhivye, poSiluetu && poSiluetu.istochnik);
     S.tela = S.svod.tela;
     if (!S.tela.length) throw new Error('ни один источник не дал тел');
     $('#znIstochnik').textContent = S.svod.istochnikov > 1 ? S.svod.istochnikov + ' источника' : (S.varianty[0]?.post || 'алгоритм');
