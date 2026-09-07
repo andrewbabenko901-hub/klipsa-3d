@@ -605,7 +605,60 @@ function pokazatSravnenie() {
   (S.svod?.raznoglasiya?.length
     ? '<h3 class="razdel">Расхождения</h3>' + S.svod.raznoglasiya.map(r =>
         `<div class="raznoglasie"><b>${r.telo?'Тело '+r.telo:'Всего'}</b>, ${r.pole}: ${r.varianty}</div>`).join('')
-    : '<div class="podskazka" style="margin-top:10px">Источники сошлись полностью.</div>');
+    : '<div class="podskazka" style="margin-top:10px">Источники сошлись полностью.</div>')
+  + tablicaUsredneniya() + syryeOtvety();
+}
+
+/**
+ * Таблица усреднения: по каждому телу — что сказал каждый источник и что
+ * в итоге взято.
+ *
+ * Категориальные поля (тип, сечение, рёбра, зубцы) берутся голосованием,
+ * числовые (доли высоты и ширины) — средним с весом. Вес источника — это не
+ * его самооценка, а измеренное совпадение его модели с фотографией: кто ближе
+ * к снимку, тот и весит больше. Всё это видно здесь построчно.
+ */
+function tablicaUsredneniya() {
+  const svod = S.svod; if (!svod || !svod.tela.length) return '';
+  const zhivye = S.varianty.filter(v => v.tela && v.tela.length);
+  if (zhivye.length < 2) return '';
+  const stroki = svod.tela.map((t, i) => {
+    const chuzhie = zhivye.map(v => {
+      const c = v.tela[i];
+      return `<tr><td class="tiho">${v.istochnik}</td><td>${c ? c.tip : '—'}</td>` +
+             `<td>${c ? c.sechenie : '—'}</td><td>${c ? (c.rebra|0) : '—'}</td>` +
+             `<td>${c ? (c.zubcov|0) : '—'}</td>` +
+             `<td>${c ? (+c.dolyaVysoty).toFixed(3) : '—'}</td>` +
+             `<td>${c ? (+c.dolyaShiriny).toFixed(3) : '—'}</td>` +
+             `<td class="tiho">${v.iou != null ? Math.round(v.iou*100) + '%' : '—'}</td></tr>`;
+    }).join('');
+    return `<div style="margin-top:10px"><b>Тело ${i+1}</b>
+      <table class="svodka"><thead><tr><th>источник</th><th>тип</th><th>сечение</th>
+        <th>рёбра</th><th>зубцы</th><th>доля H</th><th>доля W</th><th>вес</th></tr></thead>
+      <tbody>${chuzhie}
+        <tr class="itogo"><td><b>взято</b></td><td><b>${t.tip}</b></td><td><b>${t.sechenie}</b></td>
+          <td><b>${t.rebra|0}</b></td><td><b>${t.zubcov|0}</b></td>
+          <td><b>${(+t.dolyaVysoty).toFixed(3)}</b></td>
+          <td><b>${(+t.dolyaShiriny).toFixed(3)}</b></td>
+          <td class="tiho">согласие ${Math.round((t.soglasie||0)*100)}%</td></tr>
+      </tbody></table></div>`;
+  }).join('');
+  return `<h3 class="razdel">Как усреднялось</h3>
+    <div class="podskazka">Тип, сечение и количества — голосованием; доли высоты и ширины —
+      средним с весом. Вес источника — это его измеренное совпадение с фотографией,
+      а не самооценка.</div>${stroki}`;
+}
+
+/** Массив данных от каждого источника — как есть, без нашего пересказа. */
+function syryeOtvety() {
+  const est = S.varianty.filter(v => v.dannye);
+  if (!est.length) return '';
+  return '<h3 class="razdel">Массив данных от каждого источника</h3>' + est.map(v =>
+    `<details style="margin-top:6px">
+       <summary style="cursor:pointer">${v.istochnik} · ${v.model}</summary>
+       <pre class="syroj">${JSON.stringify(v.dannye, null, 2)
+         .replace(/&/g,'&amp;').replace(/</g,'&lt;')}</pre>
+     </details>`).join('');
 }
 
 // ---------- редактор примитивов ----------

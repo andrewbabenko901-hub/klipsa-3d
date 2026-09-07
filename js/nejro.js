@@ -646,6 +646,11 @@ export async function razobrat(post, klyuch, model, foto, dopolnenie, adres) {
     tela,
     uverennost: r.dannye?.uverennostObshchaya ?? 0.7,
     somneniya: r.dannye?.somneniya || [],
+    // Массив, который мы реально взяли из ответа: уже разобранный и с
+    // приведёнными именами полей, но ещё ничей не усреднённый. Держим его
+    // целиком, чтобы человек мог посмотреть глазами, что именно прислала
+    // модель, а не верить нашему пересказу.
+    dannye: r.dannye || null,
     rashod: r.rashod, sekund: +((performance.now()-t0)/1000).toFixed(1),
   };
 }
