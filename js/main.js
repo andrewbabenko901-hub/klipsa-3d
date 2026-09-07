@@ -775,7 +775,8 @@ function vstavitFoto(files) {
       const im = new Image();
       im.onload = () => { S.foto.push({ url:fr.result, img:im, imya:f.name,
         b64:fr.result.split(',')[1], mime:f.type });
-        S.vidyGotovy = false;   // снимок сменился — старые виды к нему не относятся
+        S.vidyGotovy = false;   // снимок сменился — старые виды и ответы
+        S.oprosGotov = false;   // к нему не относятся
         pokazatFoto(); if (obmerit(true)) { peresobrat(); risovatMasku(); } };
       im.src = fr.result;
     };
@@ -967,49 +968,25 @@ async function sintez() {
       } catch (e) { shag('objyom','sboj'); skazatOshibku(perevesti(e.message)); }
     }
 
-    S.varianty = [];
-    if (sAlgoritmom) { const a = razborAlgoritmom(); if (a) S.varianty.push(a); }
-
-    if (kogo.length) {
-      shag('razbor','idet');
-      const hvost = [];
-      const o = $('#pOpisanie').value.trim(); if (o) hvost.push('Описание из каталога: ' + o);
-      const p = $('#pPodskazka').value.trim(); if (p) hvost.push('Подсказка от заказчика: ' + p);
-      hvost.push('Обмер силуэта, 40 полос сверху вниз: ' + S.izmer.polosy.map(v=>v.toFixed(2)).join(', '));
-      hvost.push('Высота к ширине: ' + S.izmer.vysotaKShirine);
-      if (S.izmer.zapoln) {
-        hvost.push('Доля материала внутри огибающей по тем же полосам ' +
-          '(1.00 — сплошное сечение, меньше — между кусками есть просвет): ' +
-          S.izmer.zapoln.map(v => v.toFixed(2)).join(', '));
-        const kus = S.izmer.runs.map(r => r.length);
-        hvost.push('Сколько отдельных кусков материала видно в полосе: ' + kus.join(', '));
-      }
-      if (S.izmer.otverstie) hvost.push('На снимке видна сквозная дырка шириной ' +
-        Math.round(S.izmer.otverstie.dolyaD*100) + '% от ширины детали');
-      const kat = katalog();
-      if (kat.shirinaMm) hvost.push('Каталог: самое широкое место ' + kat.shirinaMm + ' мм');
-      if (kat.dlinaShtoka) hvost.push('Каталог: длина штока ' + kat.dlinaShtoka + ' мм');
-      const dop = hvost.join('\n');
-
-      const otvety = await Promise.all(kogo.map(async post => {
-        const model = modeli[post] || N.POSTAVSHCHIKI[post].modeli[0];
-        try {
-          if (!model) throw new Error('не задано имя модели — впиши его в «Нейронки и ключи»');
-          const r = await N.razobrat(post, klyuchi[post].trim(), model, svoiFoto(), dop,
-                                     (LS.adresa[post] || N.POSTAVSHCHIKI[post].adresPoUmolchaniyu || '').trim());
-          r.ves = 1; S.rashod.push({ istochnik:r.istochnik, post, model, rashod:r.rashod });
-          return r;
-        } catch (e) {
-          return { istochnik:N.POSTAVSHCHIKI[post].imya, post, model, tela:[], sboj:e.message };
+    // Нейронок могли уже спросить отдельной кнопкой — тогда ответы лежат
+    // в S.varianty и переспрашивать незачем: это лишние деньги, лишнее время
+    // и другие ответы, чем те, что человек только что посмотрел.
+    if (!S.oprosGotov) {
+      S.varianty = [];
+      if (sAlgoritmom) { const a = razborAlgoritmom(); if (a) S.varianty.push(a); }
+      if (kogo.length) {
+        shag('razbor','idet');
+        const otvety = await sprositVseh(kogo, klyuchi, modeli);
+        otvety.forEach(r => S.varianty.push(r));
+        const zhivyh = otvety.filter(r => r.tela && r.tela.length).length;
+        shag('razbor', zhivyh ? 'est' : 'sboj');
+        if (!zhivyh && !sAlgoritmom) {
+          const prichiny = otvety.map(r => r.sboj).filter(Boolean).join(' · ');
+          throw new Error(prichiny || 'ни одна нейронка не ответила');
         }
-      }));
-      otvety.forEach(r => S.varianty.push(r));
-      const zhivyh = otvety.filter(r => r.tela && r.tela.length).length;
-      shag('razbor', zhivyh ? 'est' : 'sboj');
-      if (!zhivyh && !sAlgoritmom) {
-        const prichiny = otvety.map(r => r.sboj).filter(Boolean).join(' · ');
-        throw new Error(prichiny || 'ни одна нейронка не ответила');
       }
+    } else {
+      shag('razbor','est');
     }
 
     shag('svod','idet');
@@ -1085,6 +1062,101 @@ async function sintez() {
     skazatOshibku('Не вышло: ' + perevesti(e.message || String(e)));
     pokazatSravnenie();
   } finally { $('#knSintez').disabled = false; }
+}
+
+/**
+ * Хвост промпта: всё, что мы намерили сами и знаем из каталога.
+ *
+ * Нейронке отправляется не только снимок. Ей отдаются наши числа — сорок полос
+ * силуэта, доля материала в каждой, число кусков, дырка, каталожные миллиметры.
+ * Она отвечает тем, чего в этих числах нет: типом элемента, формой сечения,
+ * количеством рёбер и зубцов. Размеры мы у неё не спрашиваем — она их не знает
+ * и начнёт выдумывать.
+ */
+function hvostPromta() {
+  const hvost = [];
+  const o = $('#pOpisanie').value.trim(); if (o) hvost.push('Описание из каталога: ' + o);
+  const p = $('#pPodskazka').value.trim(); if (p) hvost.push('Подсказка от заказчика: ' + p);
+  hvost.push('Обмер силуэта, 40 полос сверху вниз: ' + S.izmer.polosy.map(v=>v.toFixed(2)).join(', '));
+  hvost.push('Высота к ширине: ' + S.izmer.vysotaKShirine);
+  if (S.izmer.zapoln) {
+    hvost.push('Доля материала внутри огибающей по тем же полосам ' +
+      '(1.00 — сплошное сечение, меньше — между кусками есть просвет): ' +
+      S.izmer.zapoln.map(v => v.toFixed(2)).join(', '));
+    hvost.push('Сколько отдельных кусков материала видно в полосе: ' +
+      S.izmer.runs.map(r => r.length).join(', '));
+  }
+  if (S.izmer.otverstie) hvost.push('На снимке видна сквозная дырка шириной ' +
+    Math.round(S.izmer.otverstie.dolyaD*100) + '% от ширины детали');
+  const kat = katalog();
+  if (kat.shirinaMm) hvost.push('Каталог: самое широкое место ' + kat.shirinaMm + ' мм');
+  if (kat.dlinaShtoka) hvost.push('Каталог: длина штока ' + kat.dlinaShtoka + ' мм');
+  return hvost.join('\n');
+}
+
+/**
+ * Спросить всех разом. Один упавший поставщик не роняет остальных: его ошибка
+ * возвращается как обычный ответ с полем sboj и показывается своей карточкой.
+ */
+async function sprositVseh(kogo, klyuchi, modeli) {
+  const dop = hvostPromta();
+  return Promise.all(kogo.map(async post => {
+    const model = modeli[post] || N.POSTAVSHCHIKI[post].modeli[0];
+    try {
+      if (!model) throw new Error('не задано имя модели — впиши его в «Нейронки и ключи»');
+      const r = await N.razobrat(post, klyuchi[post].trim(), model, svoiFoto(), dop,
+                                 (LS.adresa[post] || N.POSTAVSHCHIKI[post].adresPoUmolchaniyu || '').trim());
+      r.ves = 1; S.rashod.push({ istochnik:r.istochnik, post, model, rashod:r.rashod });
+      return r;
+    } catch (e) {
+      return { istochnik:N.POSTAVSHCHIKI[post].imya, post, model, tela:[], sboj:e.message };
+    }
+  }));
+}
+
+/**
+ * Отдельный шаг «Спросить нейронки» — разбор до синтеза и независимо от него.
+ *
+ * Тот же ритм, что и у видов: загрузил снимок → нажал → посмотрел, кто что
+ * ответил → и только потом синтезируешь. Ответы остаются в S.varianty, синтез
+ * берёт их как есть и второй раз никого не дёргает.
+ */
+async function sprositNejronki() {
+  skazatOshibku('');
+  if (!S.foto.length) return skazatOshibku('Сначала загрузи фотографию — спрашивать не о чем.', true);
+  const vkl = LS.vkl, klyuchi = LS.klyuchi, modeli = LS.modeli;
+  const kogo = Object.keys(N.POSTAVSHCHIKI).filter(p => vkl[p] && (klyuchi[p]||'').trim());
+  if (!kogo.length) return skazatOshibku(
+    'Некого спрашивать: ни у одной включённой нейронки нет ключа. Открой «Нейронки и ключи».');
+  const kn = $('#knOpros');
+  if (kn) { kn.disabled = true; kn.textContent = 'Спрашиваю ' + kogo.length + '…'; }
+  shag('obmer','idet');
+  try {
+    if (!obmerit()) throw new Error('обмер не удался');
+    shag('obmer','est');
+    shag('razbor','idet');
+    S.varianty = [];
+    if ($('#chAlgoritm').checked) { const a = razborAlgoritmom(); if (a) S.varianty.push(a); }
+    const otvety = await sprositVseh(kogo, klyuchi, modeli);
+    otvety.forEach(r => S.varianty.push(r));
+    const zhivyh = otvety.filter(r => r.tela && r.tela.length).length;
+    shag('razbor', zhivyh ? 'est' : 'sboj');
+    S.oprosGotov = zhivyh > 0 || $('#chAlgoritm').checked;
+    // сводим сразу, чтобы таблица усреднения была видна ещё до синтеза
+    ocenitVariantySiluetom(S.varianty);
+    const zhivye = S.varianty.filter(v => v.tela && v.tela.length);
+    for (const v of zhivye) if (typeof v.iou === 'number') v.ves = Math.max(0.15, v.iou);
+    const poSiluetu = zhivye.filter(v => typeof v.iou === 'number').sort((a,b) => b.iou - a.iou)[0];
+    S.svod = svesti(zhivye, poSiluetu && poSiluetu.istochnik);
+    vkladka('sravnenie');
+    if (!zhivyh) skazatOshibku('Ни одна нейронка не ответила разбором. Что именно сказала ' +
+      'каждая — на вкладке «Ответы нейронок».', false);
+    pokazatRashod();
+  } catch (e) {
+    shag('razbor','sboj'); skazatOshibku(perevesti(e.message || String(e)));
+  } finally {
+    if (kn) { kn.disabled = false; kn.textContent = 'Спросить нейронки'; }
+  }
 }
 
 /**
@@ -1496,6 +1568,7 @@ function start() {
 
   $('#knSintez').onclick = sintez;
   $('#knVidy').onclick = poluchitVidy;
+  $('#knOpros').onclick = sprositNejronki;
   // Поле порога не прячем: оно нужно и кнопке «Получить виды», и галке.
   // Порог сверки нужен обоим путям — и кнопке, и галке, — поэтому поле видно всегда.
   $('#oPorogVida').oninput = e => { $('#znPorogVida').textContent = Math.round(e.target.value*100) + '%'; };

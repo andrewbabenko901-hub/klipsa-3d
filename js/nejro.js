@@ -99,6 +99,16 @@ async function poslat(url, zagolovki, telo, imya, sekund) {
       throw new Error(imya + ': выбранная бесплатная модель сейчас занята у провайдера. ' +
         'Возьми другую из списка — например minimax/minimax-m3:free — или повтори через минуту. ' +
         'Ответ поставщика: ' + m);
+    // 524 отдаёт Cloudflare, а не модель: наш шлюз ждал ответа дольше, чем
+    // Cloudflare разрешает держать запрос. Значит модель жива, просто очень
+    // медленная — крупные vision-модели у NVIDIA этим славятся.
+    if (r.status === 524 || /error code: 524/i.test(m))
+      throw new Error(imya + ': модель думала дольше, чем шлюз может ждать (Cloudflare рвёт ' +
+        'запрос примерно на сотой секунде). Возьми модель полегче — у NVIDIA проверена ' +
+        'meta/llama-3.2-11b-vision-instruct, она отвечает за секунды.');
+    if (r.status === 404 && /Not found for account|Function '/i.test(m))
+      throw new Error(imya + ': эта модель есть в каталоге, но к твоему аккаунту не ' +
+        'привязана. Возьми другую из списка — рабочие видно по кнопке «Проверить».');
     // Cloudflare Workers AI: 10 000 нейронов в сутки бесплатно, дальше отказ.
     // Норма обновляется раз в сутки, платить за это не обязательно — просто
     // подождать. Пишем прямо, а не «Свой адрес ответил 500».
@@ -490,7 +500,11 @@ export const POSTAVSHCHIKI = {
       'пускают (нет заголовков CORS), а воркер ходит со стороны сервера и ключ у себя не хранит. ' +
       'Новый index.js уже лежит в <b>ClipGen\\klipsa-worker</b> — осталась одна команда ' +
       'в этой папке: <b>npx wrangler deploy</b>.',
-    modeli: ['meta/llama-3.2-90b-vision-instruct','meta/llama-3.2-11b-vision-instruct',
+    // Порядок не случайный: 11b проверена живьём и отвечает за секунды, а 90b
+    // так долго думает, что Cloudflare режет запрос по своему таймауту (524).
+    // Остальные есть в каталоге, но на конкретном аккаунте могут быть не
+    // привязаны — тогда приходит 404 «Not found for account».
+    modeli: ['meta/llama-3.2-11b-vision-instruct','meta/llama-3.2-90b-vision-instruct',
              'google/gemma-3-12b-it','microsoft/phi-3-vision-128k-instruct','nvidia/neva-22b'],
     ceny: {},
     async spisokModeley(klyuch, adres) {
