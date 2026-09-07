@@ -538,8 +538,17 @@ export const POSTAVSHCHIKI = {
       soderzhanie.push({ type:'text', text: promt });
       const zag = { 'Content-Type':'application/json', Accept:'application/json',
                     Authorization:'Bearer ' + klyuch };
+      // Потолок ответа у NVIDIA намеренно низкий. Замерено на этой же клипсе
+      // и этой же модели (llama-3.2-11b-vision через шлюз):
+      //   max_tokens 300  →  2 секунды
+      //   max_tokens 1500 →  7 секунд
+      //   max_tokens 4096 → 34 секунды
+      // А запросов у нас два (со строгим JSON и без), и вместе они переваливали
+      // за сотню секунд — Cloudflare рвал соединение и отдавал 524. Разбор на
+      // восемь тел укладывается примерно в 1200 токенов, так что 1500 хватает
+      // с запасом, и NVIDIA снова отвечает.
       const telo = { model, messages:[{ role:'user', content: soderzhanie }],
-                     temperature:0.2, max_tokens:4096 };
+                     temperature:0.2, max_tokens:1500 };
       let j;
       try {
         // сначала со строгим JSON: NIM умеет guided_json, но не на всех моделях
