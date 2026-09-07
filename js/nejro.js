@@ -730,9 +730,11 @@ export const RISOVALKI = {
                          'stabilityai/sdxl-turbo',
                          'briaai/bria-2.3'] },
   svoj:       { imya: 'Свой адрес — Cloudflare Worker или шлюз на своём сервере',
-                modeli: ['@cf/black-forest-labs/flux-1-schnell',
+                // img2img первой: она единственная здесь видит твой снимок и
+                // рисует именно твою деталь. Остальные — по тексту, вслепую.
+                modeli: ['@cf/runwayml/stable-diffusion-v1-5-img2img',
+                         '@cf/black-forest-labs/flux-1-schnell',
                          '@cf/black-forest-labs/flux-2-klein-4b',
-                         '@cf/runwayml/stable-diffusion-v1-5-img2img',
                          '@cf/stabilityai/stable-diffusion-xl-base-1.0',
                          '@cf/bytedance/stable-diffusion-xl-lightning',
                          'black-forest-labs/flux.1-schnell',
@@ -741,16 +743,30 @@ export const RISOVALKI = {
 };
 
 /**
- * Видит ли рисовалка присланную фотографию.
+ * Умеет ли рисовалка работать поверх присланной фотографии — то есть рисовать
+ * ИМЕННО ТВОЮ деталь, а не похожую.
  *
- * Чат-модели (нанобанана и её родня) принимают картинку и рисуют «эту же
- * деталь». Чистые диффузионки — flux, stable diffusion, sdxl — фотографию не
- * видят вовсе: у них на входе только текст. Просить у них эталонный вид
- * конкретной клипсы бессмысленно, а лист разбора — тем более: получится
- * красивая посторонняя железка, иногда с выдуманными буквами.
+ * Три разных случая, и путать их нельзя:
+ *
+ *  1. Чат-модели (нанобанана и её родня) смотрят на снимок и перерисовывают
+ *     эту же деталь в любом ракурсе. Умеют всё, стоят денег.
+ *  2. img2img и inpainting берут твой снимок как основу и перерисовывают его
+ *     начисто. Твою деталь они видят и форму сохраняют — но повернуть её на
+ *     другой ракурс не могут: композиция остаётся та же. Бесплатны через свой
+ *     Cloudflare Worker.
+ *  3. Чистые диффузионки — flux, sdxl, обычная stable-diffusion — на входе
+ *     имеют только текст. Твоей детали они не видят вовсе, и попросить у них
+ *     эталонный вид бессмысленно: выйдет посторонняя железка.
  */
+export const poverhFoto = (model) => /img2img|inpaint/i.test(String(model || ''));
+
 export const risovalkaVidit = (model) =>
+  poverhFoto(model) ||
   !/flux|stable-diffusion|sdxl|dreamshaper|lightning|sana|shuttle/i.test(String(model || ''));
+
+/** Может ли рисовалка повернуть деталь на другой ракурс. img2img — не может. */
+export const risovalkaVertit = (model) =>
+  risovalkaVidit(model) && !poverhFoto(model);
 
 // Картинки у NVIDIA живут на другом хосте — ai.api.nvidia.com, путь
 // /v1/genai/<вендор>/<модель>, тело {prompt, mode, steps, seed, cfg_scale},
@@ -807,8 +823,13 @@ export async function narisovatCherez(post, klyuch, model, foto, promt, adres, p
     // берём эту цифру и повторяем один раз. Так рисование живёт до последних
     // копеек на счёте, а не падает, когда их «почти хватает».
     const imya = post === 'svoj' ? 'Свой адрес' : 'OpenRouter';
-    const zapros = (mt) => ({ model, modalities:['image','text'], max_tokens: mt,
-                              messages:[{ role:'user', content: soderzhanie }] });
+    // Для img2img сила преобразования решает всё: при 0.8 модель уводит форму
+    // в сторону и получается уже не твоя клипса, при 0.35–0.5 она чистит фон,
+    // убирает блики и тени, но силуэт оставляет твой. Берём 0.45.
+    const zapros = (mt) => Object.assign(
+      { model, modalities:['image','text'], max_tokens: mt,
+        messages:[{ role:'user', content: soderzhanie }] },
+      poverhFoto(model) ? { strength: 0.45 } : {});
     const MIN_NA_KARTINKU = 1400;
     let j;
     try { j = await poslat(baza + '/chat/completions', zagolovki, zapros(4096), imya); }

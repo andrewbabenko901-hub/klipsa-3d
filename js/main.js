@@ -412,7 +412,8 @@ async function dorisovatVidy() {
   // 2. вид сбоку — единственный, который идёт в обмер: он даёт сечение.
   //    Остальные два рисуются для листа, чтобы человек видел деталь целиком.
   let sogl = null, dobavleno = 0;
-  const nuzhenBok = !(S.izmery || []).some(v => v.rol === 'sboku' && v.izmer && !v.izNejronki);
+  const nuzhenBok = N.risovalkaVertit(model) &&
+    !(S.izmery || []).some(v => v.rol === 'sboku' && v.izmer && !v.izNejronki);
   if (nuzhenBok) {
     const b = await narisovat('sboku');
     const izmB = O.obmerit(await zagruzit(b.kartinka), nastr);
@@ -439,7 +440,9 @@ async function dorisovatVidy() {
   // 3. вид сверху и изометрия — только на лист. По ним ничего не мерят:
   //    сверху даёт форму сечения глазами, изометрия — общее понимание формы.
   //    Если своё фото такого вида уже есть, рисовать не надо.
-  for (const rol of ['sverhu', 'izometr']) {
+  //    img2img сюда не идёт: она перерисовывает присланный кадр и повернуть
+  //    деталь не умеет — вышли бы четыре одинаковых картинки.
+  for (const rol of (N.risovalkaVertit(model) ? ['sverhu', 'izometr'] : [])) {
     if (rol === 'sverhu' && (S.izmery || []).some(v => v.rol === 'sverhu' && v.izmer)) continue;
     try {
       const v = await narisovat(rol);
@@ -453,10 +456,16 @@ async function dorisovatVidy() {
     }
   }
 
-  pokazatList('Лист видов от нейронки: ' + S.listVidov.length + ' вида. Контрольный вид ' +
-              'спереди совпал со снимком на <b>' + Math.round(iou*100) + '%</b> при пороге ' +
-              Math.round(porog*100) + '%. В обмер уходит только вид сбоку — он даёт сечение; ' +
-              'миллиметры всегда с фотографии.');
+  pokazatList(N.risovalkaVertit(model)
+    ? 'Лист видов от нейронки: ' + S.listVidov.length + ' вида. Контрольный вид ' +
+      'спереди совпал со снимком на <b>' + Math.round(iou*100) + '%</b> при пороге ' +
+      Math.round(porog*100) + '%. В обмер уходит только вид сбоку — он даёт сечение; ' +
+      'миллиметры всегда с фотографии.'
+    : 'Чистый вид твоей детали, нарисован моделью <b>' + model + '</b> поверх твоего ' +
+      'снимка (img2img): фон убран, блики и тени сняты, силуэт твой — совпал со снимком на ' +
+      '<b>' + Math.round(iou*100) + '%</b>. Повернуть деталь на другой ракурс эта модель не ' +
+      'умеет, поэтому вид один. Четыре вида — на вкладке «Лист разбора», они строятся из ' +
+      'геометрии.');
   return { ok: true, iou, sogl, dobavleno };
 }
 
