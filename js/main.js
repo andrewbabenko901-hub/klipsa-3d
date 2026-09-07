@@ -712,7 +712,9 @@ function vstavitFoto(files) {
     fr.onload = () => {
       const im = new Image();
       im.onload = () => { S.foto.push({ url:fr.result, img:im, imya:f.name,
-        b64:fr.result.split(',')[1], mime:f.type }); pokazatFoto(); if (obmerit(true)) { peresobrat(); risovatMasku(); } };
+        b64:fr.result.split(',')[1], mime:f.type });
+        S.vidyGotovy = false;   // снимок сменился — старые виды к нему не относятся
+        pokazatFoto(); if (obmerit(true)) { peresobrat(); risovatMasku(); } };
       im.src = fr.result;
     };
     fr.readAsDataURL(f);
@@ -879,16 +881,17 @@ async function sintez() {
     if (!obmerit()) throw new Error('обмер не удался');
     shag('obmer','est');
 
-    if ($('#chVidy').checked) {
+    // Виды могли быть получены отдельной кнопкой до синтеза — тогда они уже
+    // лежат в S.izmery, и рисовать их второй раз незачем: это лишние деньги
+    // и другой результат, ведь нейронка каждый раз рисует чуть иначе.
+    if (S.vidyGotovy) {
+      shag('vidy','est');
+    } else if ($('#chVidy').checked) {
       shag('vidy','idet');
       try {
         const r = await dorisovatVidy();
         shag('vidy', r.slepaya ? null : (r.ok ? 'est' : 'sboj'));
-        if (r.slepaya) S.listPozzhe = 'Выбранная рисовалка — «' + LS.modelKartinki + '» — ' +
-          'фотографию не видит, поэтому эталонные виды у неё не заказывались: она нарисовала бы ' +
-          'постороннюю деталь. Чтобы нейронка рисовала именно твою клипсу, нужна зрячая модель ' +
-          '(нанобанана через OpenRouter) — она платная. Четыре вида твоей детали при этом уже ' +
-          'есть и без неё, из настоящей геометрии: вкладка «Лист разбора».';
+        if (r.slepaya) S.listPozzhe = PRO_SLEPUYU();
         else if (!r.ok) skazatOshibku('Нарисованные виды не прошли сверку с фото — ' +
           'разбор идёт по фотографии. Подробности в «Додумано моделью».', false);
       } catch (e) { shag('vidy','sboj'); skazatOshibku(perevesti(e.message)); }
@@ -1021,6 +1024,50 @@ async function sintez() {
     pokazatSravnenie();
   } finally { $('#knSintez').disabled = false; }
 }
+
+/**
+ * Отдельный шаг «Получить виды от нейронки» — до синтеза и независимо от него.
+ *
+ * Ритм такой: загрузил снимок → нажал эту кнопку → посмотрел, что нарисовалось
+ * и сколько совпало → и только потом синтезируешь модель. Виды, прошедшие
+ * сверку, остаются в S.izmery, и синтез подхватывает их сам, ничего не
+ * перерисовывая и не тратя деньги второй раз.
+ */
+async function poluchitVidy() {
+  skazatOshibku('');
+  if (!S.foto.length) return skazatOshibku(
+    'Сначала загрузи фотографию — рисовать не с чего.', true);
+  const kn = $('#knVidy'); if (kn) { kn.disabled = true; kn.textContent = 'Рисую виды…'; }
+  shag('obmer','idet');
+  try {
+    if (!obmerit()) throw new Error('обмер не удался');
+    shag('obmer','est');
+    shag('vidy','idet');
+    const r = await dorisovatVidy();
+    shag('vidy', r.slepaya ? null : (r.ok ? 'est' : 'sboj'));
+    if (r.slepaya) {
+      listNeRisovali(PRO_SLEPUYU());
+    } else if (!r.ok) {
+      skazatOshibku('Виды нарисованы, но контрольный вид спереди не сошёлся со снимком — ' +
+        'они отброшены, синтез пойдёт по фотографии. Что именно нарисовалось — на вкладке ' +
+        '«Лист нейронки».', false);
+    }
+    S.vidyGotovy = r.ok && !r.slepaya;
+    vkladka('nejro');
+    peresobrat();
+  } catch (e) {
+    shag('vidy','sboj'); skazatOshibku(perevesti(e.message || String(e)));
+  } finally {
+    if (kn) { kn.disabled = false; kn.textContent = 'Получить виды от нейронки'; }
+  }
+}
+
+// Одно объяснение на два места — чтобы текст не разъезжался.
+const PRO_SLEPUYU = () => 'Выбранная рисовалка — «' + LS.modelKartinki + '» — фотографию ' +
+  'не видит, поэтому виды у неё не заказывались: она нарисовала бы постороннюю деталь. ' +
+  'Чтобы нейронка рисовала именно твою клипсу, нужна зрячая модель (нанобанана через ' +
+  'OpenRouter) — она платная. Четыре вида твоей детали при этом уже есть и без неё, ' +
+  'из настоящей геометрии: вкладка «Лист разбора».';
 
 /**
  * Записка на вкладке «Лист нейронки», когда нейронка лист не рисовала.
@@ -1386,8 +1433,9 @@ function start() {
   addEventListener('paste', ev => { if (ev.clipboardData?.files?.length) vstavitFoto(ev.clipboardData.files); });
 
   $('#knSintez').onclick = sintez;
-  $('#chVidy').onchange = e => { $('#poleVidy').hidden = !e.target.checked && !$('#chObjyom').checked; };
-  $('#chObjyom').onchange = e => { $('#poleVidy').hidden = !e.target.checked && !$('#chVidy').checked; };
+  $('#knVidy').onclick = poluchitVidy;
+  // Поле порога не прячем: оно нужно и кнопке «Получить виды», и галке.
+  // Порог сверки нужен обоим путям — и кнопке, и галке, — поэтому поле видно всегда.
   $('#oPorogVida').oninput = e => { $('#znPorogVida').textContent = Math.round(e.target.value*100) + '%'; };
   $('#knPereschitat').onclick = peresobrat;
   $('#knPodognat').onclick = podognatPoFoto;
