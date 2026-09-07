@@ -99,6 +99,22 @@ async function poslat(url, zagolovki, telo, imya, sekund) {
       throw new Error(imya + ': выбранная бесплатная модель сейчас занята у провайдера. ' +
         'Возьми другую из списка — например minimax/minimax-m3:free — или повтори через минуту. ' +
         'Ответ поставщика: ' + m);
+    // Cloudflare Workers AI: 10 000 нейронов в сутки бесплатно, дальше отказ.
+    // Норма обновляется раз в сутки, платить за это не обязательно — просто
+    // подождать. Пишем прямо, а не «Свой адрес ответил 500».
+    if (/\b4006\b|daily free allocation|used up your daily/i.test(m))
+      throw new Error(imya + ': дневная бесплатная норма Cloudflare исчерпана — 10 000 ' +
+        'нейронов в сутки на все картинки и модели. Обновится через сутки сама. ' +
+        'Разбор по тексту при этом работает: он тратит другие лимиты.');
+    if (/\b5018\b|not allowed to access/i.test(m))
+      throw new Error(imya + ': эта модель на твоём аккаунте Cloudflare закрыта — ' +
+        'её сняли с бесплатного доступа. Выбери другую из списка.');
+    if (/\b5007\b|No such model/i.test(m))
+      throw new Error(imya + ': такой модели у Cloudflare больше нет — имя изменилось ' +
+        'или её убрали. Возьми другую из списка.');
+    if (/\b5006\b/.test(m) && /multipart/i.test(m))
+      throw new Error(imya + ': эта модель принимает запрос только в формате multipart, ' +
+        'а наш шлюз шлёт JSON. Возьми другую из списка.');
     if (r.status === 402 || /more credits|insufficient|can only afford|credit limit/i.test(m))
       throw new Error(imya + ': не хватает кредитов на счёте, платные модели этого ' +
         'поставщика работать не будут, пока счёт пуст. Бесплатные пути есть, оба рабочие:\n' +
