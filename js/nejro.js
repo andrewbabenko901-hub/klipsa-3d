@@ -486,7 +486,7 @@ export const POSTAVSHCHIKI = {
       const j = await r.json();
       if (!r.ok) {
         const t = j?.error || j?.detail || j?.title || ('HTTP ' + r.status);
-        if (r.status === 403) throw new Error(OTKAZ_403);
+        if (r.status === 403 || r.status === 401) throw new Error(OTKAZ_403);
         if (r.status === 404 && STARYJ_VORKER.test(String(t)))
           throw new Error('шлюз отвечает, но пути /nvidia/v1 у него нет — на воркере ' +
             'лежит первая версия. Выложи вторую: в папке ClipGen\\klipsa-worker ' +
@@ -519,8 +519,9 @@ export const POSTAVSHCHIKI = {
         if (/сеть не пустила/.test(e.message))
           throw new Error('NVIDIA не пускает запросы из браузера напрямую (нет заголовков CORS). ' +
                           'Нужен свой прокси — впиши его адрес в поле рядом с ключом.');
-        if (/\b403\b|Authorization failed/i.test(e.message)) throw new Error(OTKAZ_403);
+        if (/\b40[13]\b|Authorization failed|Unauthorized/i.test(e.message)) throw new Error(OTKAZ_403);
         if (!/nvext|guided|400|422/i.test(e.message)) throw e;
+        // сюда доходят только 400/422 про nvext — остальное уже отсеяно выше
         j = await poslat(url, zag, telo, 'NVIDIA');
       }
       const u = j.usage || {};
@@ -620,7 +621,8 @@ export const pryamoNaNvidia = (adres) => {
 // поэтому «Проверить» может сказать «ключ рабочий», а разбор потом упасть. Разделяем:
 // 401 без заголовка — шлюз не передал ключ; 403 — ключ передан, но NVIDIA его не приняла.
 const OTKAZ_403 =
-  'NVIDIA не приняла ключ (403 Authorization failed). Шлюз при этом работает — значит ' +
+  'NVIDIA не приняла ключ (401 Unauthorized или 403 Authorization failed — она отвечает ' +
+  'и так, и так). Шлюз при этом работает — значит ' +
   'дело в самом ключе: он отозван, просрочен или это ключ другого типа. Сделай новый на ' +
   'build.nvidia.com/settings/api-keys кнопкой Generate API Key — он должен начинаться ' +
   'с nvapi-. Ключ NGC вида «uuid:hex» здесь не подходит.';

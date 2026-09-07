@@ -345,11 +345,14 @@ async function dorisovatVidy() {
   if (!gk) throw new Error('Для эталонных видов нужен ключ: ' +
     (N.RISOVALKI[ris.post]?.imya || ris.post) + '. Впиши его в «Нейронки и ключи».');
   const model = LS.modelKartinki;
-  if (!N.risovalkaVidit(model))
-    throw new Error('Модель «' + model + '» фотографию не видит — она рисует только по тексту. ' +
-      'Эталонный вид этой же клипсы она нарисовать не может, получится посторонняя деталь. ' +
-      'Возьми в «Через кого рисовать» модель, которая смотрит на снимок (нанобанана через ' +
-      'OpenRouter), либо нарисуй лист руками и брось его в «Лист с видами от нейронки».');
+  if (!N.risovalkaVidit(model)) {
+    // Слепая рисовалка не может нарисовать ЭТУ деталь — только похожую железку.
+    // Значит рисовать нечем, но четыре вида у нас всё равно есть: из своей же
+    // геометрии. Не ошибка — просто другой источник листа.
+    S.zam.push('модель «' + model + '» фотографию не видит, эталонные виды нейронкой не рисовались; ' +
+               'лист из четырёх видов построен из нашей геометрии');
+    return { ok: true, slepaya: true, dobavleno: 0 };
+  }
   const porog = +$('#oPorogVida').value || 0.8;
   const nastr = nastrojkiObrabotki();
   const podskazka = $('#pPodskazka').value.trim();
@@ -881,7 +884,10 @@ async function sintez() {
       try {
         const r = await dorisovatVidy();
         shag('vidy', r.ok ? 'est' : 'sboj');
-        if (!r.ok) skazatOshibku('Нарисованные виды не прошли сверку с фото — ' +
+        if (r.slepaya) S.listPozzhe = 'Модель «' + LS.modelKartinki + '» фотографию не видит, ' +
+          'поэтому виды нарисованы не ей, а построены из нашей геометрии: спереди, сбоку, ' +
+          'сверху и в изометрии. Это точнее и бесплатно.';
+        else if (!r.ok) skazatOshibku('Нарисованные виды не прошли сверку с фото — ' +
           'разбор идёт по фотографии. Подробности в «Додумано моделью».', false);
       } catch (e) { shag('vidy','sboj'); skazatOshibku(perevesti(e.message)); }
     }
@@ -971,6 +977,10 @@ async function sintez() {
     }
     shag('sborka','est');
 
+    // Лист из модели можно построить только когда модель уже собрана, поэтому
+    // просьба, пришедшая на шаге видов, исполняется здесь.
+    if (S.listPozzhe) { listIzModeli(S.listPozzhe); S.listPozzhe = null; }
+
     if ($('#chList').checked) {
       shag('list','idet');
       const ris = LS.risovalka;
@@ -978,11 +988,16 @@ async function sintez() {
       const sh = S.shablon || LS.shablon;
       if (!gk) { shag('list','sboj'); skazatOshibku('Для листа картинкой нужен ключ: ' +
         (N.RISOVALKI[ris.post]?.imya || ris.post) + '.'); }
-      else if (!N.risovalkaVidit(LS.modelKartinki)) { shag('list','sboj'); skazatOshibku(
-        'Лист картинкой не собрать: модель «' + LS.modelKartinki + '» рисует только по тексту ' +
-        'и твою деталь не видит — вместо листа выйдет посторонняя железка, иногда с выдуманными ' +
-        'буквами. Готовый лист бери на вкладке «Лист разбора» — он строится из нашей модели ' +
-        'бесплатно и точно.'); }
+      else if (!N.risovalkaVidit(LS.modelKartinki)) {
+        // Слепая рисовалка — это не сбой, а просто «нечем». Лист из четырёх видов
+        // у нас всё равно есть: он строится из настоящей геометрии, бесплатно и
+        // точнее любой нейронки. Кладём его прямо сюда, чтобы не гонять человека
+        // по вкладкам, и помечаем шаг как выполненный.
+        listIzModeli('Модель «' + LS.modelKartinki + '» рисует только по тексту и твою деталь ' +
+          'не видит, поэтому лист собран не ей, а из нашей геометрии: четыре вида — спереди, ' +
+          'сбоку, сверху и в изометрии. Это точнее и бесплатно.');
+        shag('list','est');
+      }
       else if (!sh) { shag('list','sboj'); skazatOshibku('Нет шаблона вёрстки — положи его в настройках.'); }
       else try {
         const r2 = ris.post === 'gemini'
@@ -1002,6 +1017,26 @@ async function sintez() {
     skazatOshibku('Не вышло: ' + perevesti(e.message || String(e)));
     pokazatSravnenie();
   } finally { $('#knSintez').disabled = false; }
+}
+
+/**
+ * Лист из четырёх видов, снятый с нашей же геометрии.
+ *
+ * Тот самый холст, что живёт на вкладке «Лист разбора»: слева четыре проекции —
+ * спереди, сбоку, сверху, изометрия, справа тела по отдельности. Никакой
+ * нейронки, никаких денег, и главное — это ровно та деталь, которую мы собрали,
+ * а не похожая железка из чужого датасета.
+ */
+function listIzModeli(pochemu) {
+  const cv = $('#listRazbora');
+  const pusto = !cv || !cv.width || !S.els.length;
+  $('#nejroList').innerHTML = pusto
+    ? `<div style="padding:10px" class="podskazka">Лист из модели пока не построен —
+         сначала должна собраться сама модель.</div>`
+    : `<div style="padding:10px">
+         <div class="podskazka" style="margin-bottom:8px">${pochemu}</div>
+         <img src="${cv.toDataURL('image/png')}" style="width:100%;border-radius:6px">
+       </div>`;
 }
 
 function perevesti(m) {
