@@ -315,3 +315,15 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
   background: #d9a441; color: #1a1205; font-size: 10px; font-weight: 700;
 }
 #listItog { margin-top: 6px; }
+
+/* таблица усреднения и сырые массивы на вкладке «Ответы нейронок» */
+table.svodka{width:100%;border-collapse:collapse;margin-top:4px;
+  font-size:calc(10.5px*var(--m))}
+table.svodka th{text-align:left;font-weight:500;color:var(--tusklo);
+  padding:calc(3px*var(--m)) calc(5px*var(--m));border-bottom:1px solid var(--linia)}
+table.svodka td{padding:calc(3px*var(--m)) calc(5px*var(--m));
+  border-bottom:1px solid rgba(255,255,255,.05)}
+table.svodka tr.itogo td{border-top:1px solid var(--zel2);background:rgba(60,200,130,.07)}
+pre.syroj{margin:6px 0 0;padding:calc(8px*var(--m));background:#0d1712;
+  border:1px solid var(--linia);border-radius:6px;overflow:auto;max-height:340px;
+  font-size:calc(10px*var(--m));line-height:1.45;color:var(--tekst)}
