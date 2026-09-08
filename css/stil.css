@@ -316,6 +316,11 @@ dialog>footer{padding:calc(10px*var(--m)) calc(12px*var(--m));border-top:1px sol
 }
 #listItog { margin-top: 6px; }
 
+/* взрыв-схема — правая половина листа. Она не вид, обмерять её нельзя,
+   поэтому у неё нет выбора роли и она помечена другим цветом. */
+#listVidy figure.vzryv img { outline: 2px dashed #6f8fae; outline-offset: -2px; }
+#listVidy figure.vzryv figcaption { color: #6f8fae; font-size: 10px; }
+
 /* таблица усреднения и сырые массивы на вкладке «Ответы нейронок» */
 table.svodka{width:100%;border-collapse:collapse;margin-top:4px;
   font-size:calc(10.5px*var(--m))}
