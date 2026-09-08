@@ -888,10 +888,21 @@ function pokazatList() {
     fg.querySelector('.rol').onchange = e => { p.rol = e.target.value; };
     box.appendChild(fg);
   });
+  // Правая половина листа по нашему шаблону — взрыв-схема: столбик тел, из
+  // которых собрана деталь. Это не вид, обмерять её нельзя, но смотреть на неё
+  // надо: по ней видно, что за примитивы нейронка разглядела.
+  if (S.list.vzryv) {
+    const fg = document.createElement('figure');
+    fg.className = 'vzryv';
+    fg.innerHTML = `<img src="${S.list.vzryv}" alt="">
+      <figcaption>Взрыв-схема — не обмеряется</figcaption>`;
+    fg.title = 'Столбик тел с правой половины листа. Справка: из чего собрана деталь.';
+    box.appendChild(fg);
+  }
   const setka = S.list.setka || {};
   $('#listItog').textContent =
     `Нашлось ${S.list.paneli.length} панел${S.list.paneli.length === 1 ? 'ь' : 'и'}` +
-    (setka.stolbcov ? `, сетка ${setka.stolbcov}×${setka.strok}` : '') +
+    (setka.cherta ? ', лист разделён чертой: слева виды, справа взрыв-схема' : '') +
     '. Проверь роли и нажми «Взять виды».';
 }
 
